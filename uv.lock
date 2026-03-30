@@ -16,7 +16,7 @@ wheels = [
 ]
 
 [[package]]
-name = "autonovel"
+name = "autoarticle"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

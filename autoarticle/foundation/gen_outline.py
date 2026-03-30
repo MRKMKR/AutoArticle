@@ -128,18 +128,30 @@ def parse_seed(seed_path: Path) -> dict:
         if not line:
             continue
 
-        # Look for key: value
-        if ": " in line and not line.startswith(" "):
+        # Look for key: value (key followed by colon, with or without space after)
+        # BUT: lines starting with - or * or ending with : within a bullet list are NOT new keys
+        colon_pos = line.find(":")
+        is_new_key = (
+            colon_pos > 0
+            and not line.startswith(" ")
+            and not line.startswith("#")
+            and not line.startswith("-")
+            and not line.startswith("*")
+        )
+        # Also: if line starts with whitespace and looks like a continuation, don't split
+        if is_new_key:
             # Save previous key
             if current_key:
                 result[current_key] = "\n".join(current_value).strip()
 
-            key, _, value = line.partition(": ")
-            current_key = key.strip()
+            key = line[:colon_pos].strip()
+            value = line[colon_pos + 1 :].strip()  # everything after colon
+            current_key = key
             current_value = [value] if value else []
         else:
-            # Continuation of previous key
-            current_value.append(line)
+            # Continuation of previous key (skip blank lines within value)
+            if line.strip():
+                current_value.append(line)
 
     if current_key:
         result[current_key] = "\n".join(current_value).strip()
