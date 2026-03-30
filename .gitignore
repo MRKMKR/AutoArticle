@@ -1,10 +1,28 @@
+# Environment
+.env
+.env.local
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Per-article working state (each article tracks its own state)
+articles/*/
+!articles/.gitkeep
+
+# Evaluation and edit logs (generated, per-run)
 eval_logs/
 edit_logs/
 briefs/
-__pycache__/
-*.pyc
-.env
-.venv/
+
+# Build outputs
 typeset/*.pdf
 typeset/chapters_content.tex
 *.pdf
+
+# OS
+.DS_Store
+Thumbs.db

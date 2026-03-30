@@ -1,214 +1,179 @@
-# autonovel
+# AutoArticle
 
-Autonomous fantasy novel writing pipeline. The agent writes and refines
-a novel across 5 co-evolving layers, guided by automated evaluation.
+Autonomous article writing pipeline. The agent transforms a seed
+specification into a polished article through structured phases,
+guided by automated evaluation and anti-slop enforcement.
 
 ## Required Reading
 
 Before ANY writing or evaluation, the agent must internalize:
-  - `voice.md` -- Part 1 (guardrails) is permanent. Part 2 is per-novel.
-  - `CRAFT.md` -- Operationalizable frameworks for plot, character,
-    worldbuilding, foreshadowing, prose quality. This is the education.
-  - `ANTI-SLOP.md` -- Full reference on AI writing tells.
+- `refs/article_types.md` -- Type definitions and quality criteria
+- `refs/evaluation_rubric.md` -- Scoring dimensions and thresholds
+- `refs/anti_slop.md` -- Full reference on AI writing tells
+- `WORKFLOW.md` -- Step-by-step workflow
+- `PIPELINE.md` -- Technical pipeline specification
 
-## The Layer Stack
+## The Article Layer Stack
 
 ```
-  Layer 5:  voice.md          -- HOW we write (style, tone, vocabulary)
-  Layer 4:  world.md          -- WHAT exists (lore, magic, geography, history)
-  Layer 3:  characters.md     -- WHO acts (registry, arcs, relationships)
-  Layer 2:  outline.md        -- WHAT HAPPENS (beats, foreshadowing map)
-  Layer 1:  chapters/ch_NN.md -- THE ACTUAL PROSE (one file per chapter)
-  Cross-cutting: canon.md     -- WHAT IS TRUE (hard facts, consistency DB)
+  Layer 5:  voice.md          -- HOW we write (tone, style, vocabulary)
+  Layer 4:  outline.md        -- WHAT we cover (sections + key claims)
+  Layer 3:  sources.md        -- WHAT WE RELY ON (external verification)
+  Layer 2:  claims.json       -- WHAT WE CLAIM (structured factual claims)
+  Layer 1:  sections/*.md     -- THE ACTUAL PROSE (one file per section)
+  Cross-cutting: seed.txt     -- PROJECT BRIEF (type, length, audience, seed bullets)
 ```
 
 ## Setup
 
-1. **Tag the run**: Create branch `autonovel/<tag>` from master.
+1. **Tag the run**: Create branch `article/<slug>` from master.
 2. **Read all layer files** for full context.
-3. **Verify state.json** shows phase=foundation.
-4. **Confirm and go**.
+3. **Verify seed.txt** is complete (type, title, length, tone, audience, bullets, examples).
+4. **Verify state.json** shows phase=foundation.
+5. **Confirm and go**.
 
 ## Phase 1: Foundation (no prose yet)
 
-LOOP until foundation_score > 7.5 AND lore_score > 7.0:
+LOOP until foundation_score > 7.0:
   1. Run `python evaluate.py --phase=foundation`
-  2. Identify the weakest layer/dimension from the eval output
-  3. Expand or revise that layer's document
-  4. When adding facts to world.md or characters.md, ALSO log them
-     in canon.md as canonical entries
+  2. Identify the weakest dimension from the eval output
+  3. Expand or revise that document:
+     - outline.md: section structure and key claims
+     - sources.md: external verification needs
+     - voice.md: tone and style calibration
+     - claims.json: structured factual claims
+  4. If adding claims to claims.json, note source hints
   5. git commit with description of what changed
   6. Re-evaluate
   7. If score improved -> keep. If worse -> git reset --hard HEAD~1, discard.
   8. Log to results.tsv
 
-Lore priorities (the foundation evaluator weights these at 40%):
-  - Magic system: hard rules, costs, limitations, societal implications
-  - History: timeline that creates PRESENT-DAY TENSIONS, not decoration
-  - Geography/culture: distinct locations, specific customs and taboos
-  - Interconnection: magic affects politics, history explains factions,
-    geography shapes culture. Pulling one thread should move everything.
-  - Iceberg depth: more implied than stated. Hints at deeper systems.
+Foundation priorities (weighted by evaluation rubric):
+  - Clarity: Is every section's purpose and key claim clear?
+  - Technical accuracy: Are claims precise, not vague?
+  - Source coverage: Are verifiable claims identified and marked?
 
 Cross-layer consistency checks on every iteration:
-  - Outline references only lore that exists in world.md
-  - Character arcs align with outline beats
-  - Character abilities match magic system rules
-  - Foreshadowing ledger balances (every plant has a payoff)
-  - Voice exemplars exist and are non-generic
-  - Canon.md is populated with all hard facts from world.md and
-    characters.md
+  - Each outline section has at least one specific key_claim
+  - Claims in claims.json map to outline sections
+  - Voice calibration matches target audience
+  - Examples (if provided) are analyzed for transferable patterns
 
-Exit: When foundation_score > 7.5 AND lore_score > 7.0, update
-state.json phase to "drafting".
+Exit: When foundation_score > 7.0, update state.json phase to "drafting".
 
-## Phase 2: First Draft (sequential chapter writing)
+## Phase 2: First Draft (sequential section writing)
 
-FOR each chapter in outline order:
-  LOOP until chapter_score > 6.0 or attempts > 5:
-    1. Load context: voice.md + world.md + characters.md
-       + this chapter's outline entry
-       + previous chapter's last ~1000 words
-       + next chapter's outline (for continuity)
-    2. Write chapters/ch_NN.md
-    3. Run `python evaluate.py --chapter=NN`
-    4. Keep/discard based on score
-    5. If writing reveals a lore gap or inconsistency, log a debt
-       in state.json
-    6. After evaluation, check new_canon_entries in the eval output.
-       Add any new facts established in the chapter to canon.md.
-    7. Log to results.tsv
-    8. git commit
+FOR each section in outline order:
+  LOOP until section_score > 6.0 or attempts > 5:
+    1. Load context:
+       - seed.txt (full)
+       - voice.md (full)
+       - outline.md (full, this section's entry highlighted)
+       - sources.md (full)
+       - Previous section's last ~500 words (for continuity)
+       - Next section's outline entry (for flow)
+    2. gen_draft.py → sections/section_NN.md
+    3. anti_slop.py sections/section_NN.md --rewrite
+    4. Run `python evaluate.py --section=NN`
+    5. Keep/discard based on score
+    6. If writing reveals a claim gap, log a debt in state.json
+    7. Extract new claims from draft → update claims.json
+    8. Log to results.tsv
+    9. git commit
 
-Canon grows during drafting. Every chapter establishes facts (a
-character reveals something, a place is described, an event occurs).
-These get logged in canon.md so future chapters stay consistent.
+Forward progress over perfection. A 6.0 section is good enough.
+Phase 3 is for polish.
 
-After all chapters drafted, update state.json phase to "revision".
+After all sections drafted:
+  10. Run anti_slop.py across all sections (mechanical pass)
+  11. Update state.json phase to "revision"
 
-## Phase 3: Revision (infinite refinement)
+## Phase 3: Revision (multi-cycle refinement)
 
-LOOP FOREVER:
-  1. Run `python evaluate.py --full`
-  2. Identify weakest point:
-     - Lowest-scoring chapter
-     - Unresolved foreshadowing thread
-     - Consistency violation
-     - Voice deviation
-     - Pacing problem
-     - Pending debt from state.json
-  3. Decide action:
-     a. Revise a weak chapter
-     b. Fix a consistency violation (may touch lore + chapters)
-     c. Strengthen a foreshadowing thread (plant + payoff chapters)
-     d. Refine voice in the most-deviant chapter
-     e. Adjust pacing (split/merge chapters)
-     f. Update planning docs to reflect reality
-  4. Make the change(s)
-  5. git commit
-  6. Re-evaluate affected scope
-  7. Keep/discard
-  8. Log to results.tsv
+LOOP until plateau across 2 consecutive full cycles:
 
-### Propagation Rules
+### Cycle A: Clarity
+  1. evaluate.py --dimension=clarity --full
+  2. Identify lowest-scoring sections
+  3. gen_revision.py <section> --dimension=clarity
+  4. Commit, re-evaluate
 
-When a layer changes, check downstream:
-  - voice.md changes    -> re-evaluate ALL chapters for voice adherence
-  - world.md changes    -> check all chapters for lore consistency
-  - characters.md changes -> check affected chapters for dialogue/behavior
-  - outline.md changes  -> re-evaluate affected chapters for beat coverage
-  - chapter changes     -> check foreshadowing ledger, check adjacent chapters
+### Cycle B: Conciseness
+  1. adversarial_edit.py all --target=15%
+  2. Apply classified cuts per section
+  3. evaluate.py --dimension=conciseness --full
+  4. Commit, re-evaluate
 
-When writing reveals upstream issues, log a debt in state.json:
-```json
-{"trigger": "ch_07: magic system needs teleportation rules",
- "affected": ["world.md", "ch_03.md"],
- "status": "pending"}
-```
+### Cycle C: Technical Accuracy
+  1. evaluate.py --dimension=technical --full
+  2. Identify technically weak claims
+  3. fact_check.py --all
+  4. Flag unverifiable claims → source or soften
+  5. gen_revision.py affected --dimension=technical
+  6. Commit, re-evaluate
+
+### Cycle D: Source Integrity
+  1. fact_check.py --all
+  2. For each uncited claim: add citation or mark [unverified]
+  3. build_bibliography.py
+  4. evaluate.py --dimension=sources --full
+  5. Commit
+
+### Cycle E: Anti-Slop Final
+  1. anti_slop.py sections/ --full-rewrite
+  2. evaluate.py --dimension=slop --full
+  3. Commit
+
+### Plateau Detection
+After each full cycle (all 5 dimensions evaluated):
+  - If all dimension scores within ±0.2 of previous cycle → plateau
+  - If 2+ dimensions improved by >0.5 in this cycle → continue
+  - If plateau: update state.json phase to "polish"
+
+## Phase 4: Polish
+
+  1. build_final.py → final_article.md
+  2. build_bibliography.py → bibliography.md (if sources required)
+  3. Run evaluate.py --full for final scores
+  4. If final_score > 8.0 → ready. If not → return to Phase 3 targeted fix.
+  5. Commit final state as "ready for review"
 
 ## Context Window Strategy
 
-ALWAYS loaded (~8k tokens):
+ALWAYS loaded:
+  - seed.txt (full)
   - voice.md (full)
-  - characters.md (full)
-  - world.md (key rules summary)
   - outline.md (full)
-  - foreshadowing ledger (full)
+  - sources.md (full)
+  - refs/anti_slop.md (full)
 
-PER TASK (~20-30k tokens):
-  - Target chapter(s)
-  - Adjacent chapters (prev + next)
-  - Chapters connected by foreshadowing threads
+PER SECTION (~10-15k tokens):
+  - Target section (full)
+  - Adjacent sections (prev + next)
+  - claims.json (relevant entries)
 
 ## Evaluation Dimensions
 
-Foundation: world_depth, character_depth, outline_completeness,
-  foreshadowing_balance, internal_consistency
+Foundation: clarity, technical, source_coverage
 
-Chapter: voice_adherence, beat_coverage, character_voice,
-  plants_seeded, prose_quality, continuity
+Section: clarity, conciseness, technical, slop
 
-Full novel: all above + arc_completion, pacing_curve,
-  theme_coherence, foreshadowing_resolution, overall_engagement
-
-## The Stability Trap (CRITICAL)
-
-AI's worst tendency is FAVOURING STABILITY OVER CHANGE. This kills
-fiction. Actively fight it at every phase:
-
-- Characters must end TRULY different from how they began.
-- Let bad things stay bad. Not everything gets fixed.
-- Allow irreversible decisions and irreversible loss.
-- Withhold information from the reader. Maintain mystery.
-- Create genuine moral ambiguity. The "right" choice should be unclear.
-- Vary emotional intensity: quiet/explosive/dread/relief/wonder/horror.
-- If a choice has no real cost, it's not a real choice.
-- Conflicts should NOT resolve too quickly or too cleanly.
-- Resist the urge to round off sharp edges into something safer.
-
-## Foundation Phase: Voice Discovery
-
-During foundation, the agent must DISCOVER the voice for this novel:
-1. Read the world concept and initial ideas
-2. Write 5 trial passages in different registers (mythic, spare,
-   warm, cold, whimsical, etc.)
-3. Evaluate which register best serves THIS story's world and tone
-4. Select the best, refine it, write exemplar and anti-exemplar passages
-5. Fill in voice.md Part 2 with the discovered voice
-
-The voice should feel like it BELONGS in the world (Le Guin's insight:
-in fantasy, the language creates the world, not just describes it).
-
-## Foundation Phase: Character Framework
-
-Every POV character must have documented before drafting begins:
-- Wound/Want/Need/Lie chain (see CRAFT.md)
-- Three-slider profile (proactivity, likability, competence)
-- Arc type (positive, negative, or flat)
-- Speech pattern distinct from every other character
-- At least one secret the reader doesn't learn immediately
-
-## Foundation Phase: Plot Framework
-
-The outline must demonstrate:
-- Save the Cat beats at roughly correct percentage marks
-- Try-fail cycle types planned for each chapter (yes-but / no-and)
-- Foreshadowing ledger with every plant and its planned payoff
-- MICE threads identified and planned to close in reverse order
-- Escalating stakes through Act 2
+Full article: clarity, conciseness, technical, sources, tone, slop
 
 ## Rules
 
-- **NEVER STOP** during a phase. Keep looping until interrupted.
+- **NEVER STOP** during a phase. Keep looping until exit gate is met.
 - **Simpler is better**: Don't add complexity for marginal gains.
-- **Forward progress over perfection**: In Phase 2, a 6.0 chapter
-  is good enough. Phase 3 is for polish.
+- **Forward progress over perfection**: A 6.0 section is good enough.
+  Phase 3 is for polish.
 - **Log everything**: Every experiment goes in results.tsv.
 - **Different judge**: Evaluation model should differ from writing model
   when possible to avoid self-congratulation bias.
-- **Fight stability**: Actively push toward transformation, cost, and
-  genuine consequence. See "The Stability Trap" above.
-- **Specificity over abstraction**: "a jay" not "a bird." "lupine" not
-  "flowers." "the smell of hot iron" not "a metallic scent."
-- **Earn every metaphor**: Metaphors come from character experience.
-  A blacksmith thinks in terms of heat and metal. A sailor in tides.
+- **Source or soften**: Any claim that cannot be verified must either
+  be sourced or rewritten as speculation/qualification.
+- **Anti-slop is non-negotiable**: Tier 1 words are always rewritten.
+  No exceptions in final output.
+- **Specificity over abstraction**: "the ESP32 runs at 240MHz" not
+  "the chip is fast." "LiveKit's Phoenix transport" not "modern protocols."
+- **Define terms on first use**: Every technical term must be explained
+  or clearly scoped for the target audience level.
