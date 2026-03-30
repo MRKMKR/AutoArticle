@@ -26,3 +26,6 @@ typeset/chapters_content.tex
 # OS
 .DS_Store
 Thumbs.db
+seed.txt
+state.json
+claims.json

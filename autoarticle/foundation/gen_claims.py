@@ -6,18 +6,19 @@ Extracts structured factual claims from the outline for tracking and verificatio
 
 Usage:
     python gen_claims.py [--outline outline.md] [--output claims.json]
-Output: claims.json
 """
 import argparse
 import json
-import sys
 import re
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from autoarticle.utils.api import api_post
 
-SYSTEM_PROMPT = """You are a research analyst. Given an article outline, extract every factual claim into a structured JSON list.
+
+SYSTEM = """You are a research analyst. Given an article outline, extract every factual claim into a structured JSON list.
 
 Output ONLY valid JSON — no markdown code blocks, no explanation. The JSON should be an array of claim objects.
 
@@ -30,32 +31,7 @@ Each claim object:
   "source_hint": "Espressif ESP32-S3 datasheet",
   "verified": false,
   "source": null
-}
-"""
-
-
-def call_llm(prompt: str, config) -> str:
-    from autoarticle.utils.config import load_config
-    import httpx
-
-    client = httpx.Client(timeout=60)
-    response = client.post(
-        f"{config.api_base_url}/v1/messages",
-        headers={
-            "x-api-key": config.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": config.writer_model,
-            "max_tokens": 2048,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": prompt}],
-        },
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"API error: {response.status_code} {response.text}")
-    return response.json()["content"][0]["text"]
+}"""
 
 
 def main():
@@ -70,7 +46,6 @@ def main():
         sys.exit(1)
 
     outline = outline_path.read_text()
-    config = load_config()
 
     prompt = f"""Extract all factual claims from this outline into JSON.
 
@@ -79,7 +54,7 @@ def main():
 Output ONLY a JSON array. No markdown, no explanation."""
 
     print("Extracting claims...")
-    raw = call_llm(prompt, config)
+    raw = api_post(prompt, system=SYSTEM, max_tokens=2048)
 
     # Strip markdown code blocks if present
     raw = re.sub(r"^```json\s*", "", raw)

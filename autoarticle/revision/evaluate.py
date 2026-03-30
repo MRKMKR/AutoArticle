@@ -3,9 +3,9 @@
 Evaluate article quality across 6 dimensions.
 
 Usage:
-    python evaluate.py --phase=foundation [--outline outline.md] [--voice voice.md]
-    python evaluate.py --section=N [--text sections/section_NN.md]
-    python evaluate.py --full [--sections sections/]
+    python evaluate.py --phase=foundation
+    python evaluate.py --section=N
+    python evaluate.py --full
 """
 import argparse
 import json
@@ -15,14 +15,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from autoarticle.utils.config import load_config
+from autoarticle.utils.api import api_post
 from autoarticle.utils.state import load_state
 
-import httpx
 
-
-# Evaluation prompt for the judge model
-SYSTEM_PROMPT = """You are an expert article evaluator. Score articles on 6 dimensions. Be strict but fair. Rate 0-10 per dimension. Output ONLY valid JSON.
+SYSTEM = """You are an expert article evaluator. Score articles on 6 dimensions. Be strict but fair. Rate 0-10 per dimension. Output ONLY valid JSON.
 
 Dimensions:
 - clarity: Is every sentence understandable to the target audience without rereading?
@@ -43,64 +40,17 @@ Output format:
   "overall": 7,
   "weakest_dimension": "conciseness",
   "suggestions": ["suggestion 1", "suggestion 2"]
-}
-"""
+}"""
 
 
-DIMENSION_WEIGHTS = {
-    "clarity": 0.25,
-    "conciseness": 0.15,
-    "technical": 0.25,
-    "sources": 0.20,
-    "tone": 0.10,
-    "slop": 0.05,
-}
-
-
-def call_judge(text: str, context: str, config) -> dict:
-    """Call judge model for evaluation."""
-    prompt = f"""Evaluate this article.
-
-## Article Text
-
-{text[:8000]}
-
-## Context
-
-{context[:4000]}
-"""
-
-    client = httpx.Client(timeout=120)
-    response = client.post(
-        f"{config.api_base_url}/v1/messages",
-        headers={
-            "x-api-key": config.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": config.judge_model,
-            "max_tokens": 1024,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": prompt}],
-        },
-    )
-
-    if response.status_code != 200:
-        raise RuntimeError(f"API error: {response.status_code} {response.text}")
-
-    raw = response.json()["content"][0]["text"]
-
-    # Strip markdown code blocks
+def parse_json_response(raw: str) -> dict:
+    """Parse LLM JSON response, stripping markdown."""
     raw = re.sub(r"^```json\s*", "", raw)
     raw = re.sub(r"```\s*$", "", raw)
     raw = raw.strip()
-
     try:
         return json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"Warning: JSON parse failed: {e}")
-        print(f"Raw: {raw[:200]}")
+    except json.JSONDecodeError:
         return {
             "clarity": {"score": 5, "notes": "parse error"},
             "conciseness": {"score": 5, "notes": "parse error"},
@@ -114,209 +64,185 @@ def call_judge(text: str, context: str, config) -> dict:
         }
 
 
-def score_file(path: Path, context: str, config) -> dict:
-    """Score a single file."""
-    text = path.read_text()
-    return call_judge(text, context, config)
+def build_context() -> str:
+    """Load planning docs as context."""
+    parts = []
+    for fname in ["seed.txt", "outline.md", "voice.md", "sources.md"]:
+        p = Path(fname)
+        if p.exists():
+            parts.append(f"=== {fname} ===\n{p.read_text()[:2000]}")
+    return "\n\n".join(parts)
 
 
-def score_foundation(outline_path: Path, config) -> dict:
-    """Score foundation documents."""
+def score_text(text: str, context: str) -> dict:
+    prompt = f"""Evaluate this article.
+
+## Article Text
+
+{text[:8000]}
+
+## Context
+
+{context[:4000]}"""
+    raw = api_post(prompt, system=SYSTEM, max_tokens=1024)
+    return parse_json_response(raw)
+
+
+def score_foundation() -> dict:
     parts = []
     for fname in ["outline.md", "voice.md", "sources.md"]:
         p = Path(fname)
         if p.exists():
             parts.append(f"=== {fname} ===\n{p.read_text()[:3000]}")
-
     text = "\n\n".join(parts)
-    context = "Foundation phase: scoring outline structure, voice guide, and source identification."
-    return call_judge(text, context, config)
+    return score_text(text, "Foundation phase: scoring outline, voice, and sources.")
 
 
-def score_section(section_num: int, config) -> dict:
-    """Score a single section."""
+def score_section(section_num: int) -> dict:
     section_path = Path(f"sections/section_{section_num:02d}.md")
     if not section_path.exists():
-        print(f"Error: section not found: {section_path}")
-        sys.exit(1)
+        raise FileNotFoundError(f"Section not found: {section_path}")
 
-    # Build context
     ctx_parts = []
     for fname in ["seed.txt", "outline.md", "voice.md"]:
         p = Path(fname)
         if p.exists():
-            ctx_parts.append(f"=== {fname} ===\n{p.read_text()[:2000]}")
+            ctx_parts.append(f"=== {fname} ===\n{p.read_text()[:1500]}")
 
-    # Add previous and next sections for continuity
     prev = Path(f"sections/section_{section_num-1:02d}.md")
-    next_s = Path(f"sections/section_{section_num+1:02d}.md")
+    nxt = Path(f"sections/section_{section_num+1:02d}.md")
     if prev.exists():
-        ctx_parts.append(f"=== previous section ===\n{prev.read_text()[:500]}")
-    if next_s.exists():
-        ctx_parts.append(f"=== next section ===\n{next_s.read_text()[:500]}")
+        ctx_parts.append(f"=== previous ===\n{prev.read_text()[:400]}")
+    if nxt.exists():
+        ctx_parts.append(f"=== next ===\n{nxt.read_text()[:400]}")
 
     context = "\n\n".join(ctx_parts)
-    return score_file(section_path, context, config)
+    text = section_path.read_text()
+    return score_text(text, context)
 
 
-def score_full(config) -> dict:
-    """Score the complete article."""
-    sections_dir = Path("sections")
-
-    # Read all sections in order
-    section_files = sorted(sections_dir.glob("section_*.md"))
-    all_text = []
-    for sf in section_files:
-        content = sf.read_text()
-        all_text.append(f"=== {sf.name} ===\n{content}")
-
-    text = "\n\n".join(all_text)
-
-    # Context: planning docs
-    ctx_parts = []
-    for fname in ["seed.txt", "outline.md", "voice.md", "sources.md"]:
-        p = Path(fname)
-        if p.exists():
-            ctx_parts.append(f"=== {fname} ===\n{p.read_text()[:2000]}")
-    context = "\n\n".join(ctx_parts)
-
-    # Also run anti_slop mechanically
+def score_full() -> dict:
     from autoarticle.drafting.anti_slop import scan_file
 
-    slop_findings = []
+    section_files = sorted(Path("sections").glob("section_*.md"))
+    all_text = []
     for sf in section_files:
-        findings = scan_file(sf)
-        slop_findings.append({
+        all_text.append(f"=== {sf.name} ===\n{sf.read_text()}")
+
+    text = "\n\n".join(all_text)
+    context = build_context()
+
+    # Mechanical slop scan
+    slop_mechanical = []
+    for sf in section_files:
+        f = scan_file(sf)
+        slop_mechanical.append({
             "file": sf.name,
-            "tier1": len(findings["tier1"]),
-            "tier2": len(findings["tier2"]),
-            "inflation": len(findings["inflation"]),
-            "weasel": len(findings["weasel"]),
-            "passive_ratio": findings["passive_ratio"],
+            "tier1": len(f["tier1"]),
+            "tier2": len(f["tier2"]),
+            "inflation": len(f["inflation"]),
+            "weasel": len(f["weasel"]),
+            "passive_ratio": round(f["passive_ratio"], 3),
         })
 
-    llm_scores = call_judge(text, context, config)
+    scores = score_text(text, context)
 
-    # Adjust slop dimension based on mechanical scan
-    total_t1 = sum(f["tier1"] for f in slop_findings)
-    total_weasel = sum(f["weasel"] for f in slop_findings)
-    avg_passive = sum(f["passive_ratio"] for f in slop_findings) / max(len(slop_findings), 1)
+    # Adjust slop score mechanically
+    total_t1 = sum(s["tier1"] for s in slop_mechanical)
+    total_weasel = sum(s["weasel"] for s in slop_mechanical)
+    avg_passive = sum(s["passive_ratio"] for s in slop_mechanical) / max(len(slop_mechanical), 1)
 
-    mechanical_slop_penalty = 0
+    penalty = 0
     if total_t1 > 0:
-        mechanical_slop_penalty += total_t1 * 0.5
+        penalty += total_t1 * 0.5
     if total_weasel > 2:
-        mechanical_slop_penalty += (total_weasel - 2) * 0.2
+        penalty += (total_weasel - 2) * 0.2
     if avg_passive > 0.15:
-        mechanical_slop_penalty += 1.0
+        penalty += 1.0
 
-    adjusted_slop = max(0, llm_scores.get("slop", {}).get("score", 7) - mechanical_slop_penalty)
-    llm_scores["slop"]["score"] = round(adjusted_slop, 1)
-    llm_scores["slop"]["notes"] += f" (mechanical: {total_t1} tier1, {total_weasel} weasel, {avg_passive:.0%} passive)"
+    adj = max(0, scores.get("slop", {}).get("score", 7) - penalty)
+    scores["slop"]["score"] = round(adj, 1)
+    scores["slop"]["notes"] += f" (mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%})"
 
     # Recompute overall
-    dimensions = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
-    total_weight = sum(DIMENSION_WEIGHTS[d] for d in dimensions)
-    overall = sum(
-        llm_scores.get(d, {}).get("score", 6) * DIMENSION_WEIGHTS[d]
-        for d in dimensions
-    ) / total_weight
-    llm_scores["overall"] = round(overall, 1)
+    dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
+    weights = [0.25, 0.15, 0.25, 0.20, 0.10, 0.05]
+    total_w = sum(weights)
+    scores["overall"] = round(
+        sum(scores.get(d, {}).get("score", 6) * w for d, w in zip(dims, weights)) / total_w, 1
+    )
 
-    return {
-        "scores": llm_scores,
-        "slop_mechanical": slop_findings,
-        "files_scanned": len(section_files),
-    }
+    return {"scores": scores, "slop_mechanical": slop_mechanical, "files_scanned": len(section_files)}
 
 
-def print_scores(scores: dict, phase: str = "unknown") -> None:
-    """Print scores in a readable format."""
+def print_scores(scores: dict, label: str) -> None:
     print(f"\n{'='*50}")
-    print(f"EVALUATION — {phase}")
+    print(f"EVALUATION — {label}")
     print(f"{'='*50}")
-
-    dimensions = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
-    for dim in dimensions:
+    dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
+    for dim in dims:
         if dim in scores:
             s = scores[dim]
             score = s.get("score", "N/A")
-            notes = s.get("notes", "")
             bar = "█" * int(score) + "░" * (10 - int(score)) if isinstance(score, (int, float)) else ""
-            print(f"  {dim:<15} {score:>4} {bar}  {notes}")
-
+            print(f"  {dim:<15} {score:>4} {bar}  {s.get('notes', '')}")
     if "overall" in scores:
         print(f"\n  {'OVERALL':<15} {scores['overall']:>4}")
-
     if "weakest_dimension" in scores:
         print(f"\n  Weakest: {scores['weakest_dimension']}")
-
-    if "suggestions" in scores and scores["suggestions"]:
+    if scores.get("suggestions"):
         print(f"\n  Suggestions:")
-        for suggestion in scores["suggestions"][:3]:
-            print(f"    - {suggestion}")
-
-    print()
+        for sug in scores["suggestions"][:3]:
+            print(f"    - {sug}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate article quality")
-    parser.add_argument("--phase", choices=["foundation", "section", "full"], help="Evaluation mode")
-    parser.add_argument("--section", type=int, help="Section number to evaluate")
-    parser.add_argument("--outline", default="outline.md")
-    parser.add_argument("--voice", default="voice.md")
-    parser.add_argument("--output", help="Write JSON output to file")
+    parser.add_argument("--phase", choices=["foundation", "section", "full"])
+    parser.add_argument("--section", type=int)
+    parser.add_argument("--output", help="Write JSON to file")
     args = parser.parse_args()
 
-    config = load_config()
-
     if args.phase == "foundation":
-        scores = score_foundation(Path(args.outline), config)
-        print_scores(scores, "FOUNDATION")
-
+        result = score_foundation()
+        print_scores(result, "FOUNDATION")
     elif args.phase == "section" or args.section:
-        section_num = args.section or 1
-        scores = score_section(section_num, config)
-        print_scores(scores, f"SECTION {section_num}")
-
+        result = score_section(args.section or 1)
+        print_scores(result, f"SECTION {args.section or 1}")
     elif args.phase == "full":
-        result = score_full(config)
-        scores = result["scores"]
-        print_scores(scores, "FULL ARTICLE")
-        print(f"  Files scanned: {result['files_scanned']}")
-        slop = result.get("slop_mechanical", [])
-        if slop:
-            print(f"\n  Slop breakdown by section:")
-            for f in slop:
-                print(f"    {f['file']}: tier1={f['tier1']}, weasel={f['weasel']}, passive={f['passive_ratio']:.0%}")
-
+        result = score_full()
+        print_scores(result["scores"], "FULL ARTICLE")
+        print(f"\n  Files: {result['files_scanned']}")
+        for f in result.get("slop_mechanical", []):
+            print(f"    {f['file']}: tier1={f['tier1']}, weasel={f['weasel']}, passive={f['passive_ratio']:.0%}")
     else:
-        # Auto-detect
+        # Auto
         if Path("sections").exists() and list(Path("sections").glob("section_*.md")):
-            result = score_full(config)
-            scores = result["scores"]
-            print_scores(scores, "FULL ARTICLE (auto)")
+            result = score_full()
+            print_scores(result["scores"], "FULL (auto)")
         elif Path("outline.md").exists():
-            scores = score_foundation(Path(args.outline), config)
-            print_scores(scores, "FOUNDATION (auto)")
+            result = score_foundation()
+            print_scores(result, "FOUNDATION (auto)")
         else:
             print("Error: no article files found")
             sys.exit(1)
 
     if args.output:
-        Path(args.output).write_text(json.dumps(scores, indent=2))
+        Path(args.output).write_text(json.dumps(result if isinstance(result, dict) and "scores" in result else result, indent=2))
         print(f"\nScores written to: {args.output}")
 
-    # Check gates
+    # Gate check
     phase = load_state().get("phase", "unknown")
-    if phase == "foundation" and "overall" in scores:
+    if phase == "foundation" and "overall" in (result if isinstance(result, dict) else {}):
         gate = 7.0
-        status = "PASS" if scores["overall"] >= gate else "BELOW GATE"
+        status = "PASS" if result["overall"] >= gate else "BELOW GATE"
         print(f"  Foundation gate ({gate}): {status}")
-    elif phase == "drafting" and "overall" in scores:
-        gate = 6.0
-        status = "PASS" if scores["overall"] >= gate else "BELOW GATE"
-        print(f"  Draft gate ({gate}): {status}")
+    elif phase == "drafting":
+        overall = result.get("scores", {}).get("overall") if isinstance(result, dict) else None
+        if overall is not None:
+            gate = 6.0
+            status = "PASS" if overall >= gate else "BELOW GATE"
+            print(f"  Draft gate ({gate}): {status}")
 
 
 if __name__ == "__main__":

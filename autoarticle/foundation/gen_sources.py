@@ -6,7 +6,6 @@ Identifies claims in the outline that need external verification.
 
 Usage:
     python gen_sources.py [--outline outline.md] [--seed seed.txt] [--output sources.md]
-Output: sources.md
 """
 import argparse
 import sys
@@ -14,12 +13,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from autoarticle.utils.config import load_config
-
-import httpx
+from autoarticle.utils.api import api_post
 
 
-SYSTEM_PROMPT = """You are a research librarian. Given an article outline, identify every factual claim that needs external verification.
+SYSTEM = """You are a research librarian. Given an article outline, identify every factual claim that needs external verification.
 
 Output a sources.md file with this format:
 
@@ -40,29 +37,7 @@ For each claim, note what kind of source is needed. Do NOT fetch sources — jus
 - **Tertiary:** General reference, news articles
 
 ## Known Good Sources
-URLs or references you've already verified are credible.
-"""
-
-
-def call_llm(prompt: str, config) -> str:
-    client = httpx.Client(timeout=60)
-    response = client.post(
-        f"{config.api_base_url}/v1/messages",
-        headers={
-            "x-api-key": config.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": config.writer_model,
-            "max_tokens": 1536,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": prompt}],
-        },
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"API error: {response.status_code} {response.text}")
-    return response.json()["content"][0]["text"]
+URLs or references you've already verified are credible."""
 
 
 def main():
@@ -81,8 +56,6 @@ def main():
 
     outline = outline_path.read_text()
     seed = seed_path.read_text() if seed_path.exists() else ""
-
-    config = load_config()
 
     prompt = f"""Given this article outline and seed, identify every factual claim that needs external verification.
 
@@ -104,7 +77,7 @@ List all claims that need a source. Categorize by:
 Be specific — "240MHz clock speed" needs a spec sheet. "Most developers prefer Python" needs a survey."""
 
     print("Analyzing claims requiring verification...")
-    sources = call_llm(prompt, config)
+    sources = api_post(prompt, system=SYSTEM, max_tokens=1536)
 
     output_path = Path(args.output)
     output_path.write_text(sources)

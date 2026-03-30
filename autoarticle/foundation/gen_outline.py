@@ -2,24 +2,18 @@
 """
 Generate outline.md from seed.txt.
 
-Reads seed.txt (type, title, length, tone, audience, seed_bullets, examples),
-then calls the LLM to generate a structured outline with sections and key claims.
-
 Usage:
-    python gen_outline.py [--seed seed.txt]
-Output: outline.md
+    python gen_outline.py [--seed seed.txt] [--output outline.md]
 """
 import argparse
 import sys
+import re
 from pathlib import Path
 
-# Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from autoarticle.utils.config import load_config
+from autoarticle.utils.api import api_post
 from autoarticle.utils.state import load_state, save_state
-
-import httpx
 
 
 ARTICLE_LENGTHS = {
@@ -91,7 +85,7 @@ TYPE_STRUCTURES = {
 }
 
 
-SYSTEM_PROMPT = """You are an expert technical writer. Generate a structured article outline from the provided seed information.
+SYSTEM = """You are an expert technical writer. Generate a structured article outline from the provided seed information.
 
 Output a markdown outline with the following format for EACH section:
 
@@ -108,17 +102,13 @@ Output a markdown outline with the following format for EACH section:
 ---
 
 Be specific. Generic sections with vague claims are useless.
-Each key claim should be a concrete statement about what this section must communicate — not a topic heading.
-
-If the article type is "howto", the steps should be specific and independently verifiable.
-
-If examples were provided, use them to calibrate the right depth and tone for the target audience."""
+Each key claim should be a concrete statement about what this section must communicate.
+If the article type is "howto", the steps should be specific and independently verifiable."""
 
 
 def parse_seed(seed_path: Path) -> dict:
     """Parse seed.txt into a structured dict."""
     content = seed_path.read_text()
-
     result = {}
     current_key = None
     current_value = []
@@ -127,9 +117,6 @@ def parse_seed(seed_path: Path) -> dict:
         line = line.rstrip()
         if not line:
             continue
-
-        # Look for key: value (key followed by colon, with or without space after)
-        # BUT: lines starting with - or * or ending with : within a bullet list are NOT new keys
         colon_pos = line.find(":")
         is_new_key = (
             colon_pos > 0
@@ -138,138 +125,20 @@ def parse_seed(seed_path: Path) -> dict:
             and not line.startswith("-")
             and not line.startswith("*")
         )
-        # Also: if line starts with whitespace and looks like a continuation, don't split
         if is_new_key:
-            # Save previous key
             if current_key:
                 result[current_key] = "\n".join(current_value).strip()
-
             key = line[:colon_pos].strip()
-            value = line[colon_pos + 1 :].strip()  # everything after colon
+            value = line[colon_pos + 1 :].strip()
             current_key = key
             current_value = [value] if value else []
         else:
-            # Continuation of previous key (skip blank lines within value)
-            if line.strip():
+            if line.strip() and current_key is not None:
                 current_value.append(line)
 
     if current_key:
         result[current_key] = "\n".join(current_value).strip()
-
     return result
-
-
-def build_prompt(seed: dict) -> str:
-    """Build the full prompt for outline generation."""
-    article_type = seed.get("type", "explainer").strip().lower()
-    title = seed.get("title", "Untitled").strip()
-    length = seed.get("target_length", "medium").strip().lower()
-    tone = seed.get("tone", "semiformal").strip().lower()
-    audience = seed.get("audience", "intermediate").strip().lower()
-    bullets_raw = seed.get("seed_bullets", "")
-    examples_raw = seed.get("examples", "")
-
-    bullets = [b.strip() for b in bullets_raw.strip().splitlines() if b.strip()]
-    examples = [e.strip() for e in examples_raw.strip().splitlines() if e.strip()]
-
-    length_desc = ARTICLE_LENGTHS.get(length, "medium (500-1500 words)")
-    structure = TYPE_STRUCTURES.get(article_type, TYPE_STRUCTURES["explainer"])
-
-    # Format structure as guidance
-    structure_text = "\n".join(
-        f"  {i+1}. {name}: {hint}" for i, (name, hint) in enumerate(structure)
-    )
-
-    user_prompt = f"""Generate an article outline.
-
-## Article Specification
-
-**Title:** {title}
-**Type:** {article_type}
-**Target Length:** {length_desc}
-**Tone:** {tone}
-**Audience:** {audience}
-
-## Seed Thoughts (raw material to organize into sections)
-
-{chr(10).join(f"- {b}" for b in bullets)}
-
-## Style Examples (use these to calibrate depth and voice)
-
-{chr(10).join(f"- {e}" for e in examples) if examples else "(no examples provided)"}
-
-## Suggested Section Structure for "{article_type}" type
-
-{structure_text}
-
----
-
-IMPORTANT:
-- Adapt the section structure above to fit the actual content from seed thoughts
-- Do NOT force content into sections that don't naturally fit
-- Add, remove, or merge sections as the content demands
-- Be specific about what each section must cover (key claims)
-- Estimate realistic word counts per section based on target length
-"""
-
-    return f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-
-
-def call_llm(prompt: str, config: dict) -> str:
-    """Call Anthropic API to generate outline."""
-    client = httpx.Client(timeout=60)
-
-    response = client.post(
-        f"{config['api_base_url']}/v1/messages",
-        headers={
-            "x-api-key": config["anthropic_api_key"],
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": config["writer_model"],
-            "max_tokens": 2048,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": prompt}],
-        },
-    )
-
-    if response.status_code != 200:
-        raise RuntimeError(f"API error: {response.status_code} {response.text}")
-
-    data = response.json()
-    return data["content"][0]["text"]
-
-
-def generate_outline(seed_path: Path, output_path: Path) -> None:
-    """Main entry point."""
-    print(f"Reading seed from: {seed_path}")
-    seed = parse_seed(seed_path)
-
-    print(f"Article: {seed.get('title', 'Untitled')}")
-    print(f"Type: {seed.get('type', 'unknown')}")
-    print(f"Target length: {seed.get('target_length', 'medium')}")
-
-    config = load_config()
-    config_dict = {
-        "anthropic_api_key": config.anthropic_api_key,
-        "writer_model": config.writer_model,
-        "api_base_url": config.api_base_url,
-    }
-
-    print("Generating outline...")
-    prompt = build_prompt(seed)
-    outline = call_llm(prompt, config_dict)
-
-    output_path.write_text(outline)
-    print(f"Outline written to: {output_path}")
-
-    # Update state if state.json exists
-    state_path = Path("state.json")
-    if state_path.exists():
-        state = load_state()
-        state["iteration"] = state.get("iteration", 0) + 1
-        save_state(state)
 
 
 def main():
@@ -283,8 +152,62 @@ def main():
         print(f"Error: seed file not found: {seed_path}")
         sys.exit(1)
 
+    seed = parse_seed(seed_path)
+    print(f"Article: {seed.get('title', 'Untitled')}")
+    print(f"Type: {seed.get('type', 'unknown')}")
+
+    # Build user prompt
+    article_type = seed.get("type", "explainer").strip().lower()
+    title = seed.get("title", "Untitled").strip()
+    length = seed.get("target_length", "medium").strip().lower()
+    tone = seed.get("tone", "semiformal").strip().lower()
+    audience = seed.get("audience", "intermediate").strip().lower()
+    bullets = [b.strip() for b in seed.get("seed_bullets", "").splitlines() if b.strip()]
+    examples = [e.strip() for e in seed.get("examples", "").splitlines() if e.strip()]
+
+    length_desc = ARTICLE_LENGTHS.get(length, "medium (500-1500 words)")
+    structure = TYPE_STRUCTURES.get(article_type, TYPE_STRUCTURES["explainer"])
+    structure_text = "\n".join(f"  {i+1}. {n}: {h}" for i, (n, h) in enumerate(structure))
+
+    prompt = f"""Generate an article outline.
+
+## Article Specification
+
+**Title:** {title}
+**Type:** {article_type}
+**Target Length:** {length_desc}
+**Tone:** {tone}
+**Audience:** {audience}
+
+## Seed Thoughts
+
+{chr(10).join(f"- {b}" for b in bullets)}
+
+## Style Examples
+
+{chr(10).join(f"- {e}" for e in examples) if examples else "(no examples)"}
+
+## Section Structure for "{article_type}"
+
+{structure_text}
+
+---
+
+IMPORTANT: Adapt sections to fit the actual content. Add, remove, or merge sections as needed. Be specific about what each section must cover."""
+
+    print("Generating outline...")
+    outline = api_post(prompt, system=SYSTEM, max_tokens=2048)
+
     output_path = Path(args.output)
-    generate_outline(seed_path, output_path)
+    output_path.write_text(outline)
+    print(f"Outline written to: {output_path}")
+
+    # Update state
+    state_path = Path("state.json")
+    if state_path.exists():
+        state = load_state()
+        state["iteration"] = state.get("iteration", 0) + 1
+        save_state(state)
 
 
 if __name__ == "__main__":
