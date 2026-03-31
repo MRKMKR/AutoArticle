@@ -381,7 +381,7 @@ def phase_polish() -> bool:
 
     # Assemble final article
     cprint("\n  [Assemble final article]", CYAN)
-    run_python("autoarticle/polish/build_final.py", ["--no-llm", "--output", "final_article.md"], cwd=WORKDIR)
+    run_python("autoarticle/polish/build_final.py", ["--output", "final_article.md"], cwd=WORKDIR)
 
     # Move bibliography to end if it exists
     bib = WORKDIR / "bibliography.md"

@@ -26,18 +26,19 @@ def load_config() -> Config:
     # Override=False ensures shell/env vars take precedence over .env file values
     load_dotenv(override=False)
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set in .env")
-
     provider = os.getenv("AUTOARTICLE_PROVIDER", "anthropic").lower()
 
     if provider in ("zai", "zhipu"):
         base_url = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4")
-        api_key = os.getenv("GLM_API_KEY", api_key)
+        api_key = os.getenv("GLM_API_KEY", "")
+        if not api_key:
+            raise ValueError("GLM_API_KEY not set in .env (set AUTOARTICLE_PROVIDER=zai to use ZAI)")
         key_header = "api-key"
     else:
         base_url = os.getenv("AUTOARTICLE_API_BASE_URL", "https://api.anthropic.com")
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not set in .env")
         key_header = "x-api-key"
 
     return Config(
