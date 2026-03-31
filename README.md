@@ -9,7 +9,7 @@ An autonomous pipeline for writing, revising, and publishing technical articles.
 ## Quick Start
 
 ```bash
-git clone https://github.com/MRKR/AutoArticle.git
+git clone https://github.com/MRKMKR/AutoArticle.git
 cd AutoArticle
 
 # Copy and edit environment
