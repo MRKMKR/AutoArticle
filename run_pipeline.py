@@ -25,17 +25,6 @@ import time
 from pathlib import Path
 
 
-def get_seed_setting(key: str, default: str = "") -> str:
-    """Read a setting from seed.txt in WORKDIR."""
-    seed_path = WORKDIR / "seed.txt"
-    if not seed_path.exists():
-        return default
-    for line in seed_path.read_text().splitlines():
-        if line.startswith(f"{key}:"):
-            return line.split(":", 1)[1].strip()
-    return default
-
-
 WORKDIR = Path(os.environ.get("AUTOARTICLE_WORKDIR", ".")).resolve()
 MAX_REVISION_CYCLES = int(os.environ.get("AUTOARTICLE_MAX_REVISION_CYCLES", "3"))
 
@@ -396,8 +385,8 @@ def phase_polish() -> bool:
 
     final = WORKDIR / "final_article.md"
 
-    # Copy to vault if vault_output_path is set in seed.txt
-    vault_dest = get_seed_setting("vault_output_path").strip()
+    # Copy to vault if AUTOARTICLE_VAULT_OUTPUT env var is set
+    vault_dest = os.environ.get("AUTOARTICLE_VAULT_OUTPUT", "").strip()
     if vault_dest and final.exists():
         import shutil
         vault_path = Path(vault_dest).expanduser()

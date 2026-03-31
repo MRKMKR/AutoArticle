@@ -51,7 +51,6 @@ tone: casual           # casual | semi-formal | formal
 audience: intermediate # beginner | intermediate | expert
 spelling_region: us    # us | gb — controls spelling enforcement (e.g. "organize" vs "organise")
 revision_strength: gentle  # gentle | aggressive — how forcefully to apply cuts in revision cycles
-vault_output_path: ~/Asgard-Vault/Completed Articles/Article.md  # optional — copies final_article.md here after polish
 
 seed_bullets:
 - The friction of starting from a blank page is the primary motivation
@@ -146,6 +145,7 @@ GLM_API_KEY=your_zai_key_here
 ZAI_BASE_URL=https://api.z.ai/api/paas/v4
 AUTOARTICLE_WRITER_MODEL=glm-4-plus
 AUTOARTICLE_JUDGE_MODEL=glm-4-plus
+AUTOARTICLE_VAULT_OUTPUT=~/Asgard-Vault/Completed Articles/Article.md  # optional
 ```
 
 Get a key at https://model-platform.zhipuai.cn
