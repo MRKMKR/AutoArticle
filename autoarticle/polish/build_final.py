@@ -217,11 +217,19 @@ def assemble_llm(sections_dir: Path, output_path: Path) -> None:
     bib_path = Path("bibliography.md")
     if bib_path.exists():
         bib_text = bib_path.read_text().strip()
-        meaningful_lines = [l for l in bib_text.splitlines()
-                           if l.strip() and "no verified sources" not in l.lower()]
+        # Exclude the header line and placeholder
+        meaningful_lines = [
+            l for l in bib_text.splitlines()
+            if l.strip()
+            and not l.strip().startswith("#")
+            and "no verified sources" not in l.lower()
+            and l.strip() not in ("*No verified sources yet.*", "*No sources found.*")
+        ]
         if meaningful_lines:
             result += "\n\n" + bib_text
             print(f"  Bibliography appended ({len(meaningful_lines)} entries)")
+        else:
+            print(f"  Bibliography skipped (empty placeholder)")
 
     output_path.write_text(result)
     print(f"Assembled → {output_path}")

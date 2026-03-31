@@ -69,7 +69,7 @@ def main():
     args = parser.parse_args()
 
     # Resolve strength: CLI arg > seed.txt > default
-    strength = strength or get_seed_setting("revision_strength", "gentle")
+    strength = args.strength or get_seed_setting("revision_strength", "gentle")
     if strength not in ("gentle", "aggressive"):
         strength = "gentle"
 
