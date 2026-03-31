@@ -213,6 +213,16 @@ def assemble_llm(sections_dir: Path, output_path: Path) -> None:
     result = re.sub(r"^===\s*SECTION \d+\s*===\s*", "", result, flags=re.MULTILINE)
     result = result.strip()
 
+    # Only append bibliography if it has real content
+    bib_path = Path("bibliography.md")
+    if bib_path.exists():
+        bib_text = bib_path.read_text().strip()
+        meaningful_lines = [l for l in bib_text.splitlines()
+                           if l.strip() and "no verified sources" not in l.lower()]
+        if meaningful_lines:
+            result += "\n\n" + bib_text
+            print(f"  Bibliography appended ({len(meaningful_lines)} entries)")
+
     output_path.write_text(result)
     print(f"Assembled → {output_path}")
 

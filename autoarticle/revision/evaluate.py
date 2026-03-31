@@ -290,6 +290,7 @@ def score_full() -> dict:
             "inflation": len(f["inflation"]),
             "weasel": len(f["weasel"]),
             "passive_ratio": round(f["passive_ratio"], 3),
+            "em_dash_count": f["em_dash_count"],
         })
 
     scores = score_text(text, context, n_calls=3)
@@ -300,6 +301,7 @@ def score_full() -> dict:
     # Adjust slop score mechanically
     total_t1 = sum(s["tier1"] for s in slop_mechanical)
     total_weasel = sum(s["weasel"] for s in slop_mechanical)
+    total_em_dashes = sum(s["em_dash_count"] for s in slop_mechanical)
     avg_passive = sum(s["passive_ratio"] for s in slop_mechanical) / max(len(slop_mechanical), 1)
 
     penalty = 0
@@ -309,6 +311,8 @@ def score_full() -> dict:
         penalty += (total_weasel - 2) * 0.2
     if avg_passive > 0.15:
         penalty += 1.0
+    if total_em_dashes > 5:
+        penalty += min((total_em_dashes - 5) * 0.3, 2.0)
 
     def get_score(scores, d, default=6):
         val = scores.get(d, default)
@@ -319,9 +323,9 @@ def score_full() -> dict:
     adj = max(0, get_score(scores, "slop", 7) - penalty)
     if isinstance(scores.get("slop"), dict):
         scores["slop"]["score"] = round(adj, 1)
-        scores["slop"]["notes"] = scores["slop"].get("notes", "") + f" (mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%})"
+        scores["slop"]["notes"] = scores["slop"].get("notes", "") + f" (mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%}, em_dashes={total_em_dashes})"
     else:
-        scores["slop"] = {"score": round(adj, 1), "notes": f"mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%}"}
+        scores["slop"] = {"score": round(adj, 1), "notes": f"mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%}, em_dashes={total_em_dashes}"}
 
     # Recompute overall
     scores["overall"] = round(
@@ -386,7 +390,7 @@ def main():
         print_scores(result["scores"], "FULL ARTICLE")
         print(f"\n  Files: {result['files_scanned']}")
         for f in result.get("slop_mechanical", []):
-            print(f"    {f['file']}: tier1={f['tier1']}, weasel={f['weasel']}, passive={f['passive_ratio']:.0%}")
+            print(f"    {f['file']}: tier1={f['tier1']}, weasel={f['weasel']}, passive={f['passive_ratio']:.0%}, em_dashes={f['em_dash_count']}")
     else:
         # Auto
         if Path("sections").exists() and list(Path("sections").glob("section_*.md")):

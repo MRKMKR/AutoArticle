@@ -70,15 +70,15 @@ TIER2 = [
 
 # Tier 3: Filler phrases
 TIER3 = [
-    (r"It's worth noting that\b[,.\s]", ""),
-    (r"It's important to note that\b[,.\s]", ""),
-    (r"In conclusion[,.\s]", ""),
-    (r"To summarize[,.\s]", ""),
+    (r"It's worth noting that\b[,.\\s]", ""),
+    (r"It's important to note that\b[,.\\s]", ""),
+    (r"In conclusion[,.\\s]", ""),
+    (r"To summarize[,.\\s]", ""),
     (r"The fact of the matter is that\s+", ""),
     (r"It goes without saying that\s+", ""),
-    (r"Needless to say[,.\s]", ""),
-    (r"As previously stated[,.\s]", ""),
-    (r"At the end of the day[,.\s]", ""),
+    (r"Needless to say[,.\\s]", ""),
+    (r"As previously stated[,.\\s]", ""),
+    (r"At the end of the day[,.\\s]", ""),
 ]
 
 # Claim inflation
@@ -153,13 +153,72 @@ RHETORICAL_Q = [
     r"\?$",
 ]
 
+# Em-dash overuse patterns
+DASH_CONNECTIVE = [
+    r"[,;]\s*—\s*\w",
+    r"\w\s*—\s*\w{3,}\s*[,.]?\s*\w",
+    r"\s—\s[A-Z]",
+]
+
+# Spelling region dictionaries
+GB_TO_US = {
+    "organise": "organize", "organised": "organized", "organising": "organizing",
+    "recognise": "recognize", "recognised": "recognized", "recognising": "recognizing",
+    "analyse": "analyze", "analysed": "analyzed", "analysing": "analyzing",
+    "colour": "color", "coloured": "colored",
+    "favour": "favor", "favoured": "favored",
+    "behaviour": "behavior",
+    "labour": "labor",
+    "neighbour": "neighbor", "neighbourhood": "neighborhood",
+    "centre": "center",
+    "travelling": "traveling", "travelled": "traveled",
+    "labelling": "labeling", "labelled": "labeled",
+    "signalling": "signaling", "signalled": "signaled",
+    "realise": "realize", "realised": "realized", "realising": "realizing",
+    "defence": "defense", "offence": "offense",
+    "programme": "program",
+    "enquiry": "inquiry",
+    "licence": "license",
+    "practice": "practice",
+    "cheque": "check",
+    "architecture": "architecture",
+}
+
+US_TO_GB = {v: k for k, v in GB_TO_US.items()}
+
+
+def get_spelling_region() -> str:
+    """Read spelling_region from seed.txt."""
+    seed_path = Path("seed.txt")
+    if not seed_path.exists():
+        return "gb"
+    for line in seed_path.read_text().splitlines():
+        if line.startswith("spelling_region:"):
+            return line.split(":", 1)[1].strip().lower()
+    return "gb"
+
+
+def scan_spelling(text: str, region: str) -> list[dict]:
+    """Scan for spelling region violations."""
+    if region not in ("gb", "us"):
+        return []
+    lookup = GB_TO_US if region == "gb" else US_TO_GB
+    findings = []
+    for gb_form, us_form in lookup.items():
+        target = us_form if region == "gb" else gb_form
+        pattern = re.compile(r'\b' + target + r'\b', re.IGNORECASE)
+        for match in pattern.finditer(text):
+            findings.append({
+                "line": text[:match.start()].count("\n") + 1,
+                "text": match.group(),
+            })
+    return findings
+
 
 def _split_sentences(text: str) -> list[str]:
     """Split text into sentences."""
     import unicodedata
-    # Normalize unicode quotes
     text = unicodedata.normalize("NFKC", text)
-    # Split on sentence boundaries
     raw = re.split(r"(?<=[.!?])\s+", text)
     return [s.strip() for s in raw if s.strip()]
 
@@ -196,36 +255,31 @@ def scan_structural(text: str) -> dict:
     if len(sentences) < 3:
         return findings
 
-    # --- Paragraph structure ---
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     if paragraphs:
         para_lens = [len(p.split()) for p in paragraphs]
         if len(para_lens) > 1:
             findings["paragraph_length_std"] = round(statistics.stdev(para_lens), 2) if len(para_lens) > 1 else 0.0
-            # Very low stddev = suspiciously uniform paragraphs
             mean_para = statistics.mean(para_lens)
             if mean_para > 0 and findings["paragraph_length_std"] < mean_para * 0.15:
                 findings["structure_warnings"].append(
-                    f"Uniform paragraph length (std={findings['paragraph_length_std']}, mean={mean_para:.0f} words) — AI often writes paragraphs of near-identical length"
+                    f"Uniform paragraph length (std={findings['paragraph_length_std']}, mean={mean_para:.0f} words)"
                 )
 
-    # --- Sentence length variance ---
     sent_lens = [len(s.split()) for s in sentences]
     if len(sent_lens) > 2:
         findings["sentence_length_std"] = round(statistics.stdev(sent_lens), 2)
         mean_len = statistics.mean(sent_lens)
         if mean_len > 0 and findings["sentence_length_std"] < mean_len * 0.12:
             findings["structure_warnings"].append(
-                f"Uniform sentence length (std={findings['sentence_length_std']}, mean={mean_len:.0f} words) — AI often produces sentences of near-identical length"
+                f"Uniform sentence length (std={findings['sentence_length_std']}, mean={mean_len:.0f} words)"
             )
 
-    # --- Sentence first-word distribution ---
     first_words = [_first_word(s) for s in sentences]
     word_counts: dict[str, int] = {}
     for w in first_words:
         word_counts[w] = word_counts.get(w, 0) + 1
 
-    # Flag if same opener starts 25%+ of sentences
     total_sents = len(sentences)
     for word, count in word_counts.items():
         if word in ANAPHORA_STARTERS and count >= max(3, int(total_sents * 0.25)):
@@ -237,7 +291,6 @@ def scan_structural(text: str) -> dict:
             })
             findings["same_opener_count"] += count
 
-    # --- Section opener patterns (Imagine, Consider, Picture...) ---
     opener_counts: dict[str, int] = {}
     for si, sent in enumerate(sentences):
         for pattern in SECTION_OPENERS:
@@ -248,7 +301,6 @@ def scan_structural(text: str) -> dict:
         if count >= 2:
             findings["section_openers"].append({"phrase": phrase, "count": count})
 
-    # --- Explanatory closing formulas ---
     for si, sent in enumerate(sentences):
         for pattern in EXPLANATORY_CLOSE:
             if re.search(pattern, sent, re.IGNORECASE):
@@ -258,7 +310,6 @@ def scan_structural(text: str) -> dict:
                     "text": sent.strip()[:80],
                 })
 
-    # --- Filler sentence starters ---
     for si, sent in enumerate(sentences):
         for pattern in FILLER_STARTERS:
             if re.match(pattern, sent, re.IGNORECASE):
@@ -268,11 +319,8 @@ def scan_structural(text: str) -> dict:
                     "text": sent.strip()[:60],
                 })
 
-    # --- Rhetorical questions ---
     for si, sent in enumerate(sentences):
-        # Ends with ? or is a question embedded
         if "?" in sent or re.match(r"^(why|how|what|when|where|who|can|could|would|does|is)\s+", sent, re.I):
-            # Only flag if followed immediately by a statement (AI pattern)
             if si + 1 < len(sentences) and len(sent.split()) < 15:
                 findings["rhetorical_questions"].append({
                     "line": text[:text.find(sentences[si])].count("\n") + 1,
@@ -296,7 +344,6 @@ def scan_file(path: Path) -> dict:
         "passive_count": 0,
         "total_sentences": 0,
         "passive_ratio": 0.0,
-        # Structural findings
         "section_openers": [],
         "anaphora": [],
         "explanatory_close": [],
@@ -306,9 +353,13 @@ def scan_file(path: Path) -> dict:
         "sentence_length_std": 0.0,
         "same_opener_count": 0,
         "structure_warnings": [],
+        "em_dash_count": 0,
+        "em_dash_ratio": 0.0,
+        "dash_connective_hits": [],
+        "spelling_region": "gb",
+        "spelling_violations": [],
     }
 
-    # Run structural detection
     structural = scan_structural(text)
     for key in ["section_openers", "anaphora", "explanatory_close", "filler_starts",
                 "rhetorical_questions", "paragraph_length_std", "sentence_length_std",
@@ -370,6 +421,26 @@ def scan_file(path: Path) -> dict:
     findings["passive_count"] = len(passive_pattern.findall(text))
     findings["passive_ratio"] = findings["passive_count"] / findings["total_sentences"]
 
+    em_dashes = re.findall(r'[\u2014\u2013]', text)
+    findings["em_dash_count"] = len(em_dashes)
+    word_count = max(len(re.findall(r'\w+', text)), 1)
+    findings["em_dash_ratio"] = findings["em_dash_count"] / word_count
+    if findings["em_dash_count"] > 2:
+        findings["structure_warnings"].append(
+            f"Em-dash overuse: {findings['em_dash_count']} em-dashes in {word_count} words "
+            f"({findings['em_dash_ratio']:.1%})"
+        )
+    for pattern in DASH_CONNECTIVE:
+        for match in re.finditer(pattern, text):
+            findings["dash_connective_hits"].append({
+                "pattern": pattern,
+                "line": text[:match.start()].count("\n") + 1,
+                "text": match.group(),
+            })
+
+    findings["spelling_region"] = get_spelling_region()
+    findings["spelling_violations"] = scan_spelling(text, findings["spelling_region"])
+
     return findings
 
 
@@ -423,20 +494,19 @@ def print_report(findings: dict) -> None:
     if pct > 15:
         print(f"    WARNING: >15% passive — review flagged")
 
-    # Structural findings
     if findings["structure_warnings"]:
         for w in findings["structure_warnings"]:
             print(f"\n  STRUCTURE: {w}")
 
     if findings["section_openers"]:
-        print(f"\n  FORMULAIC OPENERS (Imagine/Consider/Picture...):")
+        print(f"\n  FORMULAIC OPENERS:")
         for o in findings["section_openers"]:
-            print(f"    '{o['phrase']}' x{o['count']} — AI feels compelled to frame everything as a scene")
+            print(f"    '{o['phrase']}' x{o['count']}")
 
     if findings["anaphora"]:
-        print(f"\n  ANAPHORA (This/Such/These overused as sentence starters):")
+        print(f"\n  ANAPHORA:")
         for a in findings["anaphora"]:
-            print(f"    '{a['word']}' starts {a['count']}/{a['total_sentences']} sentences ({a['pct']}%) — AI leans heavily on these")
+            print(f"    '{a['word']}' starts {a['count']}/{a['total_sentences']} sentences ({a['pct']}%)")
 
     if findings["explanatory_close"]:
         print(f"\n  EXPLANATORY CLOSE formulas:")
@@ -449,12 +519,29 @@ def print_report(findings: dict) -> None:
             print(f"    L{f['line']}: '{f['text'][:50]}...'")
 
     if findings["rhetorical_questions"]:
-        print(f"\n  RHETORICAL QUESTIONS (question + immediate answer):")
+        print(f"\n  RHETORICAL QUESTIONS:")
         for r in findings["rhetorical_questions"][:3]:
             print(f"    L{r['line']}: '{r['text']}'")
 
     if findings["paragraph_length_std"] > 0:
-        print(f"\n  Paragraph length std: {findings['paragraph_length_std']:.0f} words | Sentence length std: {findings['sentence_length_std']:.0f} words")
+        print(f"\n  Length stats: paragraph std={findings['paragraph_length_std']:.0f} words | sentence std={findings['sentence_length_std']:.0f} words")
+
+    if findings["em_dash_count"] > 0:
+        print(f"\n  Em-dashes: {findings['em_dash_count']} ({findings['em_dash_ratio']:.1%} of words)")
+        if findings["dash_connective_hits"]:
+            for h in findings["dash_connective_hits"][:3]:
+                print(f"    L{h['line']}: {repr(h['text'])}")
+
+    if findings["spelling_violations"]:
+        region = findings["spelling_region"].upper()
+        print(f"\n  Spelling ({region} expected):")
+        seen = set()
+        for v in findings["spelling_violations"]:
+            word = v["text"].lower()
+            if word not in seen:
+                seen.add(word)
+                expected = GB_TO_US.get(word, US_TO_GB.get(word, word))
+                print(f"    L{v['line']}: '{v['text']}' (use '{expected}')")
 
 
 SYSTEM_REWRITE = """You are an expert editor. Remove AI slop from text while preserving all facts and meaning.
@@ -476,6 +563,8 @@ Remove or replace:
   "This means/suggests/implies..."
 - Rhetorical question + immediate answer pairs
 - Uniform paragraph and sentence length (vary it)
+- Em-dash overloading — replace breathy em-dash chains with proper sentences or periods
+- Spelling: use {spelling_region} spellings
 
 Rewrite flagged passages to be direct and human. Do not change facts or add new content.
 Output ONLY the rewritten text."""
@@ -484,7 +573,10 @@ Output ONLY the rewritten text."""
 def rewrite_with_llm(path: Path) -> str:
     """Use LLM to rewrite text with slop removed."""
     text = path.read_text()
-    return api_post(text, system=SYSTEM_REWRITE, max_tokens=2048)
+    region = get_spelling_region()
+    region_note = "British (GB) spellings" if region == "gb" else "American (US) spellings"
+    system_prompt = SYSTEM_REWRITE.format(spelling_region=region_note)
+    return api_post(text, system=system_prompt, max_tokens=2048)
 
 
 def rewrite_text(text: str) -> str:
