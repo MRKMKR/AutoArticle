@@ -109,6 +109,178 @@ VAGUE_QUANT = [
     r"\ba lot\b",
 ]
 
+# Structural: formulaic section openers
+SECTION_OPENERS = [
+    r"\bImagine\b",
+    r"\bPicture\b",
+    r"\bConsider\b",
+    r"\bVisualize\b",
+    r"\bThink of\b",
+    r"\bLet's imagine\b",
+    r"\bWhat if I told you\b",
+]
+
+# Structural: anaphoric sentence openers (same word starts multiple sentences close together)
+ANAPHORA_STARTERS = [
+    "this", "such", "these", "it", "that",
+]
+
+# Structural: explanatory closing formulas
+EXPLANATORY_CLOSE = [
+    r"what this (means|shows|suggests|indicates)",
+    r"in other words",
+    r"to put it another way",
+    r"to sum up",
+    r"the key takeaway is",
+    r"the bottom line is",
+    r"here's the thing",
+    r"the point is",
+]
+
+# Structural: filler sentence starters (especially AI)
+FILLER_STARTERS = [
+    r"\bImportantly\b",
+    r"\bAdditionally\b",
+    r"\bFurthermore\b",
+    r"\bMoreover\b",
+    r"\bIn fact\b",
+    r"\bAs a result\b",
+    r"\bThis (means|implies|suggests|indicates|shows|reveals)\b",
+]
+
+# Structural: rhetorical questions
+RHETORICAL_Q = [
+    r"\?$",
+]
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences."""
+    import unicodedata
+    # Normalize unicode quotes
+    text = unicodedata.normalize("NFKC", text)
+    # Split on sentence boundaries
+    raw = re.split(r"(?<=[.!?])\s+", text)
+    return [s.strip() for s in raw if s.strip()]
+
+
+def _first_word(sentence: str) -> str:
+    """Get the normalized first word of a sentence."""
+    m = re.search(r"^([\"']?)([A-Za-z]+)", sentence)
+    return m.group(2).lower() if m else ""
+
+
+def _opening_phrase(sentence: str, max_words: int = 3) -> str:
+    """Get the first N words of a sentence as a phrase."""
+    words = re.findall(r"[A-Za-z]+", sentence)
+    return " ".join(words[:max_words]).lower()
+
+
+def scan_structural(text: str) -> dict:
+    """Detect structural AI/LLM writing patterns."""
+    findings = {
+        "section_openers": [],
+        "anaphora": [],
+        "explanatory_close": [],
+        "filler_starts": [],
+        "rhetorical_questions": [],
+        "paragraph_length_std": 0.0,
+        "sentence_length_std": 0.0,
+        "same_opener_count": 0,
+        "structure_warnings": [],
+    }
+
+    import statistics
+
+    sentences = _split_sentences(text)
+    if len(sentences) < 3:
+        return findings
+
+    # --- Paragraph structure ---
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if paragraphs:
+        para_lens = [len(p.split()) for p in paragraphs]
+        if len(para_lens) > 1:
+            findings["paragraph_length_std"] = round(statistics.stdev(para_lens), 2) if len(para_lens) > 1 else 0.0
+            # Very low stddev = suspiciously uniform paragraphs
+            mean_para = statistics.mean(para_lens)
+            if mean_para > 0 and findings["paragraph_length_std"] < mean_para * 0.15:
+                findings["structure_warnings"].append(
+                    f"Uniform paragraph length (std={findings['paragraph_length_std']}, mean={mean_para:.0f} words) — AI often writes paragraphs of near-identical length"
+                )
+
+    # --- Sentence length variance ---
+    sent_lens = [len(s.split()) for s in sentences]
+    if len(sent_lens) > 2:
+        findings["sentence_length_std"] = round(statistics.stdev(sent_lens), 2)
+        mean_len = statistics.mean(sent_lens)
+        if mean_len > 0 and findings["sentence_length_std"] < mean_len * 0.12:
+            findings["structure_warnings"].append(
+                f"Uniform sentence length (std={findings['sentence_length_std']}, mean={mean_len:.0f} words) — AI often produces sentences of near-identical length"
+            )
+
+    # --- Sentence first-word distribution ---
+    first_words = [_first_word(s) for s in sentences]
+    word_counts: dict[str, int] = {}
+    for w in first_words:
+        word_counts[w] = word_counts.get(w, 0) + 1
+
+    # Flag if same opener starts 25%+ of sentences
+    total_sents = len(sentences)
+    for word, count in word_counts.items():
+        if word in ANAPHORA_STARTERS and count >= max(3, int(total_sents * 0.25)):
+            findings["anaphora"].append({
+                "word": word,
+                "count": count,
+                "total_sentences": total_sents,
+                "pct": round(count / total_sents * 100),
+            })
+            findings["same_opener_count"] += count
+
+    # --- Section opener patterns (Imagine, Consider, Picture...) ---
+    opener_counts: dict[str, int] = {}
+    for si, sent in enumerate(sentences):
+        for pattern in SECTION_OPENERS:
+            if re.search(pattern, sent, re.IGNORECASE):
+                phrase = _opening_phrase(sent, max_words=2)
+                opener_counts[phrase] = opener_counts.get(phrase, 0) + 1
+    for phrase, count in opener_counts.items():
+        if count >= 2:
+            findings["section_openers"].append({"phrase": phrase, "count": count})
+
+    # --- Explanatory closing formulas ---
+    for si, sent in enumerate(sentences):
+        for pattern in EXPLANATORY_CLOSE:
+            if re.search(pattern, sent, re.IGNORECASE):
+                findings["explanatory_close"].append({
+                    "phrase": pattern,
+                    "line": text[:text.find(sentences[si])].count("\n") + 1,
+                    "text": sent.strip()[:80],
+                })
+
+    # --- Filler sentence starters ---
+    for si, sent in enumerate(sentences):
+        for pattern in FILLER_STARTERS:
+            if re.match(pattern, sent, re.IGNORECASE):
+                findings["filler_starts"].append({
+                    "pattern": pattern,
+                    "line": text[:text.find(sentences[si])].count("\n") + 1,
+                    "text": sent.strip()[:60],
+                })
+
+    # --- Rhetorical questions ---
+    for si, sent in enumerate(sentences):
+        # Ends with ? or is a question embedded
+        if "?" in sent or re.match(r"^(why|how|what|when|where|who|can|could|would|does|is)\s+", sent, re.I):
+            # Only flag if followed immediately by a statement (AI pattern)
+            if si + 1 < len(sentences) and len(sent.split()) < 15:
+                findings["rhetorical_questions"].append({
+                    "line": text[:text.find(sentences[si])].count("\n") + 1,
+                    "text": sent.strip()[:80],
+                })
+
+    return findings
+
 
 def scan_file(path: Path) -> dict:
     """Scan a single file for slop patterns."""
@@ -124,7 +296,24 @@ def scan_file(path: Path) -> dict:
         "passive_count": 0,
         "total_sentences": 0,
         "passive_ratio": 0.0,
+        # Structural findings
+        "section_openers": [],
+        "anaphora": [],
+        "explanatory_close": [],
+        "filler_starts": [],
+        "rhetorical_questions": [],
+        "paragraph_length_std": 0.0,
+        "sentence_length_std": 0.0,
+        "same_opener_count": 0,
+        "structure_warnings": [],
     }
+
+    # Run structural detection
+    structural = scan_structural(text)
+    for key in ["section_openers", "anaphora", "explanatory_close", "filler_starts",
+                "rhetorical_questions", "paragraph_length_std", "sentence_length_std",
+                "same_opener_count", "structure_warnings"]:
+        findings[key] = structural[key]
 
     for pattern in TIER1:
         for match in re.finditer(pattern, text, re.IGNORECASE):
@@ -234,6 +423,39 @@ def print_report(findings: dict) -> None:
     if pct > 15:
         print(f"    WARNING: >15% passive — review flagged")
 
+    # Structural findings
+    if findings["structure_warnings"]:
+        for w in findings["structure_warnings"]:
+            print(f"\n  STRUCTURE: {w}")
+
+    if findings["section_openers"]:
+        print(f"\n  FORMULAIC OPENERS (Imagine/Consider/Picture...):")
+        for o in findings["section_openers"]:
+            print(f"    '{o['phrase']}' x{o['count']} — AI feels compelled to frame everything as a scene")
+
+    if findings["anaphora"]:
+        print(f"\n  ANAPHORA (This/Such/These overused as sentence starters):")
+        for a in findings["anaphora"]:
+            print(f"    '{a['word']}' starts {a['count']}/{a['total_sentences']} sentences ({a['pct']}%) — AI leans heavily on these")
+
+    if findings["explanatory_close"]:
+        print(f"\n  EXPLANATORY CLOSE formulas:")
+        for e in findings["explanatory_close"]:
+            print(f"    L{e['line']}: '{e['text'][:60]}...'")
+
+    if findings["filler_starts"]:
+        print(f"\n  FILLER SENTENCE STARTERS:")
+        for f in findings["filler_starts"][:5]:
+            print(f"    L{f['line']}: '{f['text'][:50]}...'")
+
+    if findings["rhetorical_questions"]:
+        print(f"\n  RHETORICAL QUESTIONS (question + immediate answer):")
+        for r in findings["rhetorical_questions"][:3]:
+            print(f"    L{r['line']}: '{r['text']}'")
+
+    if findings["paragraph_length_std"] > 0:
+        print(f"\n  Paragraph length std: {findings['paragraph_length_std']:.0f} words | Sentence length std: {findings['sentence_length_std']:.0f} words")
+
 
 SYSTEM_REWRITE = """You are an expert editor. Remove AI slop from text while preserving all facts and meaning.
 
@@ -244,8 +466,18 @@ Remove or replace:
 - Claim inflation: revolutionary, groundbreaking, game-changing, disruptive
 - Weasel words: "experts say", "research suggests", "it is believed that", etc.
 - Vague quantification without specifics
+- Formulaic openers: "Imagine...", "Picture...", "Consider...", "Visualize...",
+  "Think of...", "Let's imagine..."
+- Excessive "This/Such/These/It" as sentence openers (anaphora)
+- Explanatory close formulas: "What this means is...", "In other words...",
+  "To sum up...", "Here's the thing...", "The point is..."
+- Filler sentence starters: "Importantly...", "Additionally...",
+  "Furthermore...", "Moreover...", "In fact...", "As a result...",
+  "This means/suggests/implies..."
+- Rhetorical question + immediate answer pairs
+- Uniform paragraph and sentence length (vary it)
 
-Rewrite flagged sentences to be direct and human. Do not change facts or add new content.
+Rewrite flagged passages to be direct and human. Do not change facts or add new content.
 Output ONLY the rewritten text."""
 
 
