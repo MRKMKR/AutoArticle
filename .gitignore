@@ -29,3 +29,9 @@ Thumbs.db
 seed.txt
 state.json
 claims.json
+sections/
+final_article.md
+outline.md
+sources.md
+voice.md
+bibliography.md
