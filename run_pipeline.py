@@ -332,7 +332,7 @@ def phase_revision(max_cycles: int = 5) -> bool:
         cprint(f"\n  [Revise section {weakest_section_num} — targeting {target_dimension}]", CYAN)
         run_python(
             "autoarticle/revision/gen_revision.py",
-            [str(weakest_section_num), "--auto", target_dimension],
+            [str(weakest_section_num), "--auto", target_dimension, "--strength", "gentle"],
             cwd=WORKDIR,
         )
 

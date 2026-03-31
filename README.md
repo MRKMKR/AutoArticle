@@ -49,6 +49,8 @@ target_length: medium   # short | medium | long
 include_sources: basic  # none | basic | full
 tone: casual           # casual | semi-formal | formal
 audience: intermediate # beginner | intermediate | expert
+spelling_region: us    # us | gb — controls spelling enforcement (e.g. "organize" vs "organise")
+revision_strength: gentle  # gentle | aggressive — how forcefully to apply cuts in revision cycles
 
 seed_bullets:
 - The friction of starting from a blank page is the primary motivation
@@ -106,6 +108,28 @@ seed_bullets:
 - For neurodivergent people, AI could notice what you miss
 - Current status: voice works, vision experimental, long-term memory functional
 ```
+
+### Spelling Region
+
+`spelling_region` controls which spelling conventions are enforced throughout the pipeline:
+
+| Value | Effect |
+|-------|--------|
+| `us` (default) | US spellings enforced; British variants flagged as errors |
+| `gb` | British spellings enforced; US variants flagged as errors |
+
+When set, the anti-slop scanner detects regional spelling violations (e.g. "organize" vs "organise", "color" vs "colour", "behavior" vs "behaviour") and the rewrite pass corrects them. The LLM is instructed to use the correct regional spelling throughout.
+
+### Revision Strength
+
+`revision_strength` controls how aggressively revision cycles apply cuts and rewrites:
+
+| Value | Effect |
+|-------|--------|
+| `gentle` (default) | Only high-severity cuts applied. Minimal text change — preserves original phrasing where adequate. Small, safe improvements only. Never produces a worse score. |
+| `aggressive` | All cuts (high + medium) applied. Significant restructuring, filler removal, and rewrites. Higher risk of score regression but can produce substantially tighter output. |
+
+Use `aggressive` when you want a tight final draft and are willing to accept score volatility during revision cycles. Use `gentle` for incremental, safe improvement across multiple runs.
 
 ---
 
