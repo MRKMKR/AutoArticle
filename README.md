@@ -51,6 +51,7 @@ tone: casual           # casual | semi-formal | formal
 audience: intermediate # beginner | intermediate | expert
 spelling_region: us    # us | gb — controls spelling enforcement (e.g. "organize" vs "organise")
 revision_strength: gentle  # gentle | aggressive — how forcefully to apply cuts in revision cycles
+vault_output_path: ~/Asgard-Vault/Completed Articles/Article.md  # optional — copies final_article.md here after polish
 
 seed_bullets:
 - The friction of starting from a blank page is the primary motivation

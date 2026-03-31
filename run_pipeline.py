@@ -25,6 +25,17 @@ import time
 from pathlib import Path
 
 
+def get_seed_setting(key: str, default: str = "") -> str:
+    """Read a setting from seed.txt in WORKDIR."""
+    seed_path = WORKDIR / "seed.txt"
+    if not seed_path.exists():
+        return default
+    for line in seed_path.read_text().splitlines():
+        if line.startswith(f"{key}:"):
+            return line.split(":", 1)[1].strip()
+    return default
+
+
 WORKDIR = Path(os.environ.get("AUTOARTICLE_WORKDIR", ".")).resolve()
 MAX_REVISION_CYCLES = int(os.environ.get("AUTOARTICLE_MAX_REVISION_CYCLES", "3"))
 
@@ -383,15 +394,16 @@ def phase_polish() -> bool:
     cprint("\n  [Assemble final article]", CYAN)
     run_python("autoarticle/polish/build_final.py", ["--output", "final_article.md"], cwd=WORKDIR)
 
-    # Move bibliography to end if it exists
-    bib = WORKDIR / "bibliography.md"
     final = WORKDIR / "final_article.md"
-    if bib.exists() and final.exists():
-        content = final.read_text()
-        if "## Bibliography" not in content and "# Bibliography" not in content:
-            content += "\n\n" + bib.read_text()
-            final.write_text(content)
-            cprint("  Bibliography appended to final article.", GREEN)
+
+    # Copy to vault if vault_output_path is set in seed.txt
+    vault_dest = get_seed_setting("vault_output_path").strip()
+    if vault_dest and final.exists():
+        import shutil
+        vault_path = Path(vault_dest).expanduser()
+        vault_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(final, vault_path)
+        cprint(f"  Copied to vault: {vault_path}", GREEN)
 
     state = load_state()
     state["phase"] = "polish"
