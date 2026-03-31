@@ -110,10 +110,14 @@ def score_text(text: str, context: str, n_calls: int = 1) -> dict:
         raw = api_post(prompt, system=SYSTEM, max_tokens=1024)
         result = parse_json_response(raw)
 
-        # Extract numeric scores
+        # Extract numeric scores — handle both dict format and bare int format
         scored = {}
         for d in dims:
-            s = result.get(d, {}).get("score", 6)
+            val = result.get(d, {})
+            if isinstance(val, dict):
+                s = val.get("score", 6)
+            else:
+                s = int(val) if val is not None else 6
             scored[d] = max(0, min(10, s))  # clamp to 0-10
         all_scores.append(scored)
 
@@ -123,7 +127,7 @@ def score_text(text: str, context: str, n_calls: int = 1) -> dict:
         vals = [s[d] for s in all_scores if d in s]
         avg = round(sum(vals) / len(vals), 1) if vals else 6.0
         # Preserve notes from the first call only
-        notes = all_scores[0].get(d, {}).get("notes", "") if all_scores else ""
+        notes = ""
         averaged[d] = {"score": avg, "notes": notes}
 
     # Overall = weighted average of averaged dimensions
@@ -217,12 +221,19 @@ def score_all_sections() -> dict:
         dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
         weights = [0.25, 0.15, 0.25, 0.20, 0.10, 0.05]
         total_w = sum(weights)
+
+        def get_score(scores, d, default=6):
+            val = scores.get(d, default)
+            if isinstance(val, dict):
+                return val.get("score", default)
+            return max(0, min(10, int(val) if val is not None else default))
+
         overall = round(
-            sum(scores.get(d, {}).get("score", 6) * w for d, w in zip(dims, weights)) / total_w, 1
+            sum(get_score(scores, d) * w for d, w in zip(dims, weights)) / total_w, 1
         )
 
         # Find weakest dimension for this section
-        weakest = min(dims, key=lambda d: scores.get(d, {}).get("score", 10))
+        weakest = min(dims, key=lambda d: get_score(scores, d, 10))
 
         entry = {"section": s_num, "overall": overall, "weakest": weakest}
         for d in dims:
@@ -283,6 +294,9 @@ def score_full() -> dict:
         })
 
     scores = score_text(text, context, n_calls=3)
+    dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
+    weights = [0.25, 0.15, 0.25, 0.20, 0.10, 0.05]
+    total_w = sum(weights)
 
     # Adjust slop score mechanically
     total_t1 = sum(s["tier1"] for s in slop_mechanical)
@@ -297,16 +311,19 @@ def score_full() -> dict:
     if avg_passive > 0.15:
         penalty += 1.0
 
-    adj = max(0, scores.get("slop", {}).get("score", 7) - penalty)
+    def get_score(scores, d, default=6):
+        val = scores.get(d, default)
+        if isinstance(val, dict):
+            return val.get("score", default)
+        return max(0, min(10, int(val) if val is not None else default))
+
+    adj = max(0, get_score(scores, "slop", 7) - penalty)
     scores["slop"]["score"] = round(adj, 1)
     scores["slop"]["notes"] += f" (mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%})"
 
     # Recompute overall
-    dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
-    weights = [0.25, 0.15, 0.25, 0.20, 0.10, 0.05]
-    total_w = sum(weights)
     scores["overall"] = round(
-        sum(scores.get(d, {}).get("score", 6) * w for d, w in zip(dims, weights)) / total_w, 1
+        sum(get_score(scores, d) * w for d, w in zip(dims, weights)) / total_w, 1
     )
 
     return {"scores": scores, "slop_mechanical": slop_mechanical, "files_scanned": len(section_files)}
