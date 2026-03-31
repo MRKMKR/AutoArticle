@@ -89,7 +89,7 @@ SYSTEM = """You are an expert technical writer. Generate a structured article ou
 
 Output a markdown outline with the following format for EACH section:
 
-## Section Title
+## N. Section Title
 
 **Key Claims (must cover in this section):**
 - Claim 1
@@ -100,6 +100,13 @@ Output a markdown outline with the following format for EACH section:
 **Transition to next:** One sentence describing how this section flows into the next.
 
 ---
+
+CRITICAL HEADING FORMAT: Every section heading MUST use the format "## N. Title" where N is the section number starting at 1.
+Examples:
+  ## 1. Motivation: From Blank Page to Polished Article
+  ## 2. Approach: The Layered Architecture
+  ## 3. What Went Well: System Wins
+Do NOT use "## Section N: Title", "## N: Title", or unnumbered "## Title" format. The heading MUST start with "## N. " (number, period, space).
 
 Be specific. Generic sections with vague claims are useless.
 Each key claim should be a concrete statement about what this section must communicate.

@@ -48,7 +48,7 @@ def load_context(section_num: int) -> str:
     if outline_path.exists():
         lines = outline_path.read_text().split("\n")
         for i, line in enumerate(lines):
-            if line.startswith(f"## Section {section_num + 1} "):
+            if line.startswith(f"## {section_num + 1}. "):
                 next_lines = []
                 for j in range(i + 1, min(i + 15, len(lines))):
                     if lines[j].startswith("## "):
@@ -64,10 +64,11 @@ def load_context(section_num: int) -> str:
 def extract_section_outline(outline_text: str, section_num: int) -> str:
     """Extract the outline block for a specific section number.
 
-    Handles three formats:
-    - "## Section 1: Title"  (numbered named)
-    - "## 1. Title"           (numbered with dot)
-    - "## Title"              (unnumbered — section_num = nth such heading)
+    Standard format: "## N. Title" (e.g., "## 1. Motivation: From Blank Page").
+    Also handles legacy formats (belt-and-braces):
+    - "## Section N: Title"
+    - "## N: Title"
+    - "## Title" (unnumbered — section_num = nth such heading)
     """
     import re
 
