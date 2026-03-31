@@ -237,8 +237,7 @@ def score_all_sections() -> dict:
 
         entry = {"section": s_num, "overall": overall, "weakest": weakest}
         for d in dims:
-            if d in scores:
-                entry[d] = scores[d]["score"]
+            entry[d] = get_score(scores, d)
 
         per_section.append(entry)
 
@@ -318,8 +317,11 @@ def score_full() -> dict:
         return max(0, min(10, int(val) if val is not None else default))
 
     adj = max(0, get_score(scores, "slop", 7) - penalty)
-    scores["slop"]["score"] = round(adj, 1)
-    scores["slop"]["notes"] += f" (mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%})"
+    if isinstance(scores.get("slop"), dict):
+        scores["slop"]["score"] = round(adj, 1)
+        scores["slop"]["notes"] = scores["slop"].get("notes", "") + f" (mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%})"
+    else:
+        scores["slop"] = {"score": round(adj, 1), "notes": f"mech: tier1={total_t1}, weasel={total_weasel}, passive={avg_passive:.0%}"}
 
     # Recompute overall
     scores["overall"] = round(
@@ -336,10 +338,15 @@ def print_scores(scores: dict, label: str) -> None:
     dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
     for dim in dims:
         if dim in scores:
-            s = scores[dim]
-            score = s.get("score", "N/A")
+            val = scores[dim]
+            if isinstance(val, dict):
+                score = val.get("score", "N/A")
+                notes = val.get("notes", "")
+            else:
+                score = val
+                notes = ""
             bar = "█" * int(score) + "░" * (10 - int(score)) if isinstance(score, (int, float)) else ""
-            print(f"  {dim:<15} {score:>4} {bar}  {s.get('notes', '')}")
+            print(f"  {dim:<15} {score:>4} {bar}  {notes}")
     if "overall" in scores:
         print(f"\n  {'OVERALL':<15} {scores['overall']:>4}")
     if "weakest_dimension" in scores:
