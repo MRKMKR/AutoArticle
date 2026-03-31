@@ -121,6 +121,84 @@ def score_section(section_num: int) -> dict:
     return score_text(text, context)
 
 
+def score_all_sections() -> dict:
+    """Score every section individually. Returns per-section scores with the
+    weakest section identified.
+
+    Output format:
+    {
+        "per_section": [
+            {"section": 1, "overall": 7.0, "weakest": "conciseness",
+             "clarity": 8, "conciseness": 6, ...},
+            ...
+        ],
+        "weakest_section": 3,        # section number with lowest overall
+        "weakest_dimension": "conciseness",  # most common weakest across all
+        "full_article_score": {...},  # existing full-article scores
+    }
+    """
+    section_files = sorted(Path("sections").glob("section_*.md"))
+
+    # Sort naturally by section number
+    def section_num(f):
+        import re
+        m = re.search(r"section_(\d+)", f.name)
+        return int(m.group(1)) if m else 0
+
+    section_files.sort(key=section_num)
+
+    per_section = []
+    for sf in section_files:
+        m = re.search(r"section_(\d+)", sf.name)
+        if not m:
+            continue
+        s_num = int(m.group(1))
+        scores = score_section(s_num)
+
+        dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
+        weights = [0.25, 0.15, 0.25, 0.20, 0.10, 0.05]
+        total_w = sum(weights)
+        overall = round(
+            sum(scores.get(d, {}).get("score", 6) * w for d, w in zip(dims, weights)) / total_w, 1
+        )
+
+        # Find weakest dimension for this section
+        weakest = min(dims, key=lambda d: scores.get(d, {}).get("score", 10))
+
+        entry = {"section": s_num, "overall": overall, "weakest": weakest}
+        for d in dims:
+            if d in scores:
+                entry[d] = scores[d]["score"]
+
+        per_section.append(entry)
+
+    # Weakest section = lowest overall score
+    weakest_entry = min(per_section, key=lambda x: x["overall"])
+    weakest_section = weakest_entry["section"]
+
+    # Most common weakest dimension across all sections
+    weakest_counts = {}
+    for e in per_section:
+        w = e["weakest"]
+        weakest_counts[w] = weakest_counts.get(w, 0) + 1
+    weakest_dimension = max(weakest_counts, key=weakest_counts.get)
+
+    # Global overall = mean of per-section overalls
+    overall = round(sum(e["overall"] for e in per_section) / len(per_section), 1) if per_section else 0.0
+
+    return {
+        "per_section": per_section,
+        "weakest_section": weakest_section,
+        "weakest_dimension": weakest_dimension,
+        "weakest_entry": weakest_entry,
+        "overall": overall,
+        "scores": {
+            "overall": overall,
+            "weakest_dimension": weakest_dimension,
+        },  # backward-compat with existing pipeline code
+    }
+
+
 def score_full() -> dict:
     from autoarticle.drafting.anti_slop import scan_file
 
@@ -198,7 +276,7 @@ def print_scores(scores: dict, label: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate article quality")
-    parser.add_argument("--phase", choices=["foundation", "section", "full"])
+    parser.add_argument("--phase", choices=["foundation", "section", "full", "per-section"])
     parser.add_argument("--section", type=int)
     parser.add_argument("--output", help="Write JSON to file")
     args = parser.parse_args()
@@ -209,6 +287,17 @@ def main():
     elif args.phase == "section" or args.section:
         result = score_section(args.section or 1)
         print_scores(result, f"SECTION {args.section or 1}")
+    elif args.phase == "per-section":
+        result = score_all_sections()
+        print(f"\n{'='*50}")
+        print(f"PER-SECTION SCORES")
+        print(f"{'='*50}")
+        for entry in result["per_section"]:
+            bar = "█" * int(entry["overall"]) + "░" * (10 - int(entry["overall"]))
+            print(f"  Section {entry['section']:>2}: {entry['overall']:>4}  {bar}  weakest={entry['weakest']}")
+        print(f"\n  → Target section {result['weakest_section']} (lowest score)")
+        print(f"  → Weakest dimension overall: {result['weakest_dimension']}")
+        print(f"  → Per-section weakest: {result['weakest_entry']}")
     elif args.phase == "full":
         result = score_full()
         print_scores(result["scores"], "FULL ARTICLE")
@@ -230,7 +319,9 @@ def main():
     if args.output:
         out_path = Path(args.output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(result if isinstance(result, dict) and "scores" in result else result, indent=2))
+        # score_all_sections returns top-level keys, score_full returns {"scores": ..., "slop_mechanical": ...}
+        out_data = result if isinstance(result, dict) and "scores" in result else result
+        out_path.write_text(json.dumps(out_data, indent=2))
         print(f"\nScores written to: {args.output}")
 
     # Gate check

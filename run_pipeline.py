@@ -13,7 +13,7 @@ Usage:
 
 Environment:
     AUTOARTICLE_WORKDIR  Directory to run in (default: current dir)
-    AUTOARTICLE_MAX_REVISION_CYCLES  Max revision loops (default: 5)
+    AUTOARTICLE_MAX_REVISION_CYCLES  Max revision loops (default: 3, with restore-on-degradation)
 """
 import argparse
 import importlib.util
@@ -26,13 +26,14 @@ from pathlib import Path
 
 
 WORKDIR = Path(os.environ.get("AUTOARTICLE_WORKDIR", ".")).resolve()
-MAX_REVISION_CYCLES = int(os.environ.get("AUTOARTICLE_MAX_REVISION_CYCLES", "5"))
+MAX_REVISION_CYCLES = int(os.environ.get("AUTOARTICLE_MAX_REVISION_CYCLES", "3"))
 
 # Colour codes
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
 CYAN = "\033[96m"
+GREY = "\033[90m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
@@ -238,7 +239,8 @@ def phase_revision(max_cycles: int = 5) -> bool:
 
     state = load_state()
     cycle = state.get("revision_cycle", 0)
-    prev_scores = None
+    prev_overall = None
+    sections_backup = None  # for restore-on-degradation
 
     for cycle in range(1, max_cycles + 1):
         state["revision_cycle"] = cycle
@@ -246,93 +248,101 @@ def phase_revision(max_cycles: int = 5) -> bool:
 
         heading(f"Revision Cycle {cycle}/{MAX_REVISION_CYCLES}")
 
-        # Evaluate current state
-        cprint("  [Evaluate]", CYAN)
-        eval_ok = run_python("autoarticle/revision/evaluate.py", ["--phase", "full", "--output", f"eval_logs/cycle_{cycle}.json"], cwd=WORKDIR)
+        # ---- Snapshot sections BEFORE revision (for restore-on-degradation) ----
+        sections_backup = {}
+        for sf in sorted((WORKDIR / "sections").glob("section_*.md")):
+            sections_backup[sf.name] = sf.read_text()
 
-        # Load scores
+        # ---- Evaluate: per-section + full article ----
+        cprint("  [Evaluate — per-section]", CYAN)
+        eval_ok = run_python(
+            "autoarticle/revision/evaluate.py",
+            ["--phase", "per-section", "--output", f"eval_logs/cycle_{cycle}.json"],
+            cwd=WORKDIR,
+        )
+
         eval_file = WORKDIR / "eval_logs" / f"cycle_{cycle}.json"
-        current_scores = None
+        eval_data = None
         if eval_file.exists():
             try:
-                current_scores = json.loads(eval_file.read_text()).get("scores", {})
+                eval_data = json.loads(eval_file.read_text())
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Fallback: parse from stdout text if file unavailable
-        if not current_scores:
+        current_scores = None
+        overall = None
+        if eval_data:
+            current_scores = eval_data.get("scores", {})
+            overall = eval_data.get("overall")
+
+        # Fallback: parse overall from stdout if file unavailable
+        if not overall:
             import re
             stdout_text = eval_ok.stdout if hasattr(eval_ok, "stdout") else ""
             m = re.search(r"OVERALL\s+([0-9.]+)", stdout_text)
             if m:
                 overall = float(m.group(1))
-                weakest_m = re.search(r"Weakest:\s*(\w+)", stdout_text)
-                weakest = weakest_m.group(1) if weakest_m else ""
-                current_scores = {"overall": overall, "weakest_dimension": weakest}
-                cprint(f"  Overall score (stdout): {overall}/10", CYAN)
-                cprint(f"  Weakest dimension: {weakest}", YELLOW)
 
-        overall = current_scores.get("overall") if current_scores else None
-
-        if overall is not None and current_scores:
+        if overall is not None:
             cprint(f"  Overall score: {overall}/10", CYAN)
-            weakest = current_scores.get("weakest_dimension", "")
-            cprint(f"  Weakest dimension: {weakest}", YELLOW)
         else:
-            cprint("  Could not parse scores.", YELLOW)
+            cprint("  Could not parse overall score.", YELLOW)
 
-        # Check for plateau (same overall score as previous cycle)
-        if prev_scores is not None and overall is not None:
-            prev_overall = prev_scores.get("overall")
-            if prev_overall is not None and abs(overall - prev_overall) < 0.2:
-                cprint(f"\n  Score plateau detected ({prev_overall} → {overall}). Stopping.", GREEN)
-                break
+        # ---- Check for degradation ----
+        if prev_overall is not None and overall is not None and overall < prev_overall:
+            cprint(f"\n  Score dropped ({prev_overall} → {overall}). Restoring sections from pre-revision snapshot.", RED)
+            for name, content in sections_backup.items():
+                (WORKDIR / "sections" / name).write_text(content)
+            cprint("  Sections restored. Stopping revision.", RED)
+            break
+
+        if prev_overall is not None and overall is not None and abs(overall - prev_overall) < 0.2:
+            cprint(f"\n  Score plateau detected ({prev_overall} → {overall}). Stopping.", GREEN)
+            break
 
         if overall is not None and overall >= 8.5:
             cprint(f"\n  Score {overall} >= 8.5 — good enough to proceed.", GREEN)
             break
 
-        # Adversarial edit — find cuts
+        if cycle == max_cycles:
+            cprint(f"\n  Max cycles ({max_cycles}) reached.", YELLOW)
+            break
+
+        # ---- Identify target section from per-section scores ----
+        weakest_section_num = 1
+        target_dimension = "clarity"
+        if eval_data and "per_section" in eval_data:
+            ps = eval_data["per_section"]
+            if ps:
+                # Target the section with the lowest overall score
+                target = min(ps, key=lambda x: x.get("overall", 10))
+                weakest_section_num = target.get("section", 1)
+                target_dimension = target.get("weakest", "clarity")
+                cprint(f"  Per-section: section {weakest_section_num} is weakest ({target.get('overall')}/10, dimension={target_dimension})", CYAN)
+                for entry in ps:
+                    cprint(f"    Section {entry['section']:>2}: {entry['overall']:>4}  weakest={entry['weakest']}", GREY)
+        else:
+            cprint(f"  No per-section data — targeting section 1", YELLOW)
+
+        # ---- Adversarial edit pass (still useful for context) ----
         cprint("\n  [Adversarial edit]", CYAN)
         run_python("autoarticle/revision/adversarial_edit.py", ["all", "--target-pct", "15", "--output", "edit_logs/"], cwd=WORKDIR)
 
-        # Find weakest dimension (from eval) and weakest section (from adversarial edit cuts)
-        weakest_dim = "clarity"
-        weakest_section = "1"
-        if current_scores and isinstance(current_scores, dict):
-            weakest_dim = current_scores.get("weakest_dimension", "clarity")
-
-        # Pick section with most adversarial cuts; fallback to section 1
-        import re
-        cut_counts = {}
-        edit_dir = WORKDIR / "edit_logs"
-        if edit_dir.exists():
-            for cut_file in sorted(edit_dir.glob("section_*_cuts.json")):
-                try:
-                    cuts = json.loads(cut_file.read_text())
-                    cut_counts[cut_file.name] = len(cuts.get("cuts", []))
-                except (json.JSONDecodeError, OSError):
-                    pass
-            if cut_counts:
-                worst_file = max(cut_counts, key=cut_counts.get)
-                m = re.search(r"section_(\d+)", worst_file)
-                if m:
-                    weakest_section = m.group(1)
-
-        cprint(f"\n  [Revise section {weakest_section} — targeting {weakest_dim}]", CYAN)
+        # ---- Revise the weakest section with its specific weakest dimension ----
+        cprint(f"\n  [Revise section {weakest_section_num} — targeting {target_dimension}]", CYAN)
         run_python(
             "autoarticle/revision/gen_revision.py",
-            [str(weakest_section), "--auto", weakest_dim],
+            [str(weakest_section_num), "--auto", target_dimension],
             cwd=WORKDIR,
         )
 
         # Anti-slop recheck on revised section
-        cprint(f"\n  [Recheck anti-slop on section {weakest_section}]", CYAN)
-        section_file = WORKDIR / "sections" / f"section_{int(weakest_section):02d}.md"
+        cprint(f"\n  [Recheck anti-slop on section {weakest_section_num}]", CYAN)
+        section_file = WORKDIR / "sections" / f"section_{weakest_section_num:02d}.md"
         if section_file.exists():
             run_python("autoarticle/drafting/anti_slop.py", [str(section_file), "--mode", "rewrite"], cwd=WORKDIR)
 
-        prev_scores = current_scores
+        prev_overall = overall
         cprint(f"\n  Cycle {cycle} complete.", YELLOW)
 
     state["phase"] = "revision"
@@ -450,7 +460,7 @@ Examples:
     parser.add_argument("--continue", dest="do_continue", action="store_true", help="Continue from saved state")
     parser.add_argument("--check", action="store_true", help="Check prerequisites only")
     parser.add_argument("--dry-run", action="store_true", help="Show commands without running")
-    parser.add_argument("--max-cycles", type=int, default=5, help="Max revision cycles (default: 5)")
+    parser.add_argument("--max-cycles", type=int, default=3, help="Max revision cycles (default: 3)")
     args = parser.parse_args()
 
     max_cycles = args.max_cycles
