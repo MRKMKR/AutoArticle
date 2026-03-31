@@ -25,7 +25,7 @@ PHASE_REQUIREMENTS = {
     "draft": {
         "outline.md": (
             "Structured outline from gen_outline",
-            ["## Section", "Key Claims"],
+            ["Key Claims", "Target Length"],
         ),
         "voice.md": (
             "Voice guide from gen_voice",
@@ -120,7 +120,11 @@ def check_phase(phase: str, missing_only: bool = False) -> bool:
     all_req = {**inherited.get(phase, {}), **requirements}
 
     all_ok = True
-    for file_path, (desc, hints) in all_req.items():
+    for file_path, value in all_req.items():
+        # Skip None entries (placeholder for directory checks handled dynamically)
+        if value is None:
+            continue
+        desc, hints = value
         is_dir = file_path == "sections"
         ok, msg = check_file(file_path, hints, is_dir=is_dir)
         status = "PASS" if ok else "FAIL"
@@ -132,7 +136,10 @@ def check_phase(phase: str, missing_only: bool = False) -> bool:
     # Phase-specific dynamic checks
     if phase == "draft":
         if Path("outline.md").exists():
-            section_count = Path("outline.md").read_text().count("## Section")
+            import re
+            outline_text = Path("outline.md").read_text()
+            # Count all ## headings (not ###) — captures ## Section N, ## N., ## Title
+            section_count = len(re.findall(r'^## [^#]', outline_text, re.MULTILINE))
             print(f"  Sections found in outline: {section_count}")
             if section_count == 0:
                 print(f"  [ ] FAIL outline has no sections")

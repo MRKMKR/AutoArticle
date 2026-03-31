@@ -228,7 +228,9 @@ def main():
             sys.exit(1)
 
     if args.output:
-        Path(args.output).write_text(json.dumps(result if isinstance(result, dict) and "scores" in result else result, indent=2))
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(result if isinstance(result, dict) and "scores" in result else result, indent=2))
         print(f"\nScores written to: {args.output}")
 
     # Gate check

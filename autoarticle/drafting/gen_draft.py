@@ -61,17 +61,43 @@ def load_context(section_num: int) -> str:
 
 
 def extract_section_outline(outline_text: str, section_num: int) -> str:
-    """Extract the outline block for a specific section number."""
+    """Extract the outline block for a specific section number.
+
+    Handles three formats:
+    - "## Section 1: Title"  (numbered named)
+    - "## 1. Title"           (numbered with dot)
+    - "## Title"              (unnumbered — section_num = nth such heading)
+    """
+    import re
+
+    # Collect all top-level ## headings (not ###)
+    headings = []
+    for line in outline_text.split("\n"):
+        m = re.match(r"^(#{2,3}) (.*)", line)
+        if not m:
+            continue
+        level, title = m.groups()
+        if level == "##":  # Only top-level headings
+            headings.append(title.strip())
+
+    if section_num > len(headings):
+        return ""
+
+    target_title = headings[section_num - 1]
+
+    # Now extract content between this heading and the next ## heading
     lines = outline_text.split("\n")
     in_section = False
     section_lines = []
 
     for line in lines:
-        if line.startswith(f"## Section {section_num} "):
+        if line.lstrip("#").strip() == target_title and line.startswith("## "):
+            if in_section:
+                break
             in_section = True
             section_lines.append(line)
         elif in_section:
-            if line.startswith("## "):
+            if re.match(r"^## .", line) or re.match(r"^# .", line):
                 break
             section_lines.append(line)
 

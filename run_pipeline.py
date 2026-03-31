@@ -73,11 +73,14 @@ def run_python(script_path: str, extra_args: list[str] | None = None, cwd: Path 
 
 
 def count_outline_sections() -> int:
-    """Count sections in outline."""
+    """Count sections in outline. Handles both '## Section N' and '## N.' formats."""
+    import re
     outline = WORKDIR / "outline.md"
     if not outline.exists():
         return 0
-    return outline.read_text().count("## Section")
+    text = outline.read_text()
+    # Count all ## headings (not ###) — handles ## Section N, ## N., ## Title
+    return len(re.findall(r'^## [^#]', text, re.MULTILINE))
 
 
 def count_sections() -> int:
@@ -153,13 +156,13 @@ def phase_foundation() -> bool:
     all_ok = True
     for name, cmd in steps:
         cprint(f"  [{name}]", CYAN)
-        if not run_python(cmd[0], cmd[2:], cwd=WORKDIR):
+        if not run_python(cmd[0], cmd[1:], cwd=WORKDIR):
             all_ok = False
             cprint(f"  [{name}] FAILED — continuing anyway", RED)
 
     if all_ok:
         cprint("\n  Running foundation evaluation...", YELLOW)
-        run_python("autoarticle/revision/evaluate.py", ["--phase=foundation"], cwd=WORKDIR)
+        run_python("autoarticle/revision/evaluate.py", ["--phase", "foundation"], cwd=WORKDIR)
 
         # Update state
         state = load_state()
@@ -211,7 +214,7 @@ def phase_draft() -> bool:
 
     # Evaluate
     cprint("\n  [Evaluate draft]", CYAN)
-    run_python("autoarticle/revision/evaluate.py", ["--full"], cwd=WORKDIR)
+    run_python("autoarticle/revision/evaluate.py", ["--phase", "full"], cwd=WORKDIR)
 
     state = load_state()
     state["phase"] = "draft"
@@ -221,7 +224,7 @@ def phase_draft() -> bool:
     return all_ok
 
 
-def phase_revision() -> bool:
+def phase_revision(max_cycles: int = 5) -> bool:
     heading("Phase 3: Revision")
 
     cprint("  Checking prerequisites...", YELLOW)
@@ -245,17 +248,33 @@ def phase_revision() -> bool:
 
         # Evaluate current state
         cprint("  [Evaluate]", CYAN)
-        eval_ok = run_python("autoarticle/revision/evaluate.py", ["--full", "--output", f"eval_logs/cycle_{cycle}.json"], cwd=WORKDIR)
+        eval_ok = run_python("autoarticle/revision/evaluate.py", ["--phase", "full", "--output", f"eval_logs/cycle_{cycle}.json"], cwd=WORKDIR)
 
         # Load scores
         eval_file = WORKDIR / "eval_logs" / f"cycle_{cycle}.json"
         current_scores = None
         if eval_file.exists():
-            current_scores = json.loads(eval_file.read_text()).get("scores", {})
+            try:
+                current_scores = json.loads(eval_file.read_text()).get("scores", {})
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Fallback: parse from stdout text if file unavailable
+        if not current_scores:
+            import re
+            stdout_text = eval_ok.stdout if hasattr(eval_ok, "stdout") else ""
+            m = re.search(r"OVERALL\s+([0-9.]+)", stdout_text)
+            if m:
+                overall = float(m.group(1))
+                weakest_m = re.search(r"Weakest:\s*(\w+)", stdout_text)
+                weakest = weakest_m.group(1) if weakest_m else ""
+                current_scores = {"overall": overall, "weakest_dimension": weakest}
+                cprint(f"  Overall score (stdout): {overall}/10", CYAN)
+                cprint(f"  Weakest dimension: {weakest}", YELLOW)
 
         overall = current_scores.get("overall") if current_scores else None
 
-        if overall is not None:
+        if overall is not None and current_scores:
             cprint(f"  Overall score: {overall}/10", CYAN)
             weakest = current_scores.get("weakest_dimension", "")
             cprint(f"  Weakest dimension: {weakest}", YELLOW)
@@ -468,7 +487,10 @@ Examples:
 
     for phase in phases_to_run:
         runner = PHASES[phase]
-        ok = runner()
+        if phase == "revision":
+            ok = runner(max_cycles=max_cycles)
+        else:
+            ok = runner()
         if not ok and phase in ("foundation", "draft"):
             cprint(f"\n{phase.capitalize()} failed. Fix errors and re-run with --continue", RED)
             break
