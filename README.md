@@ -2,7 +2,7 @@
 
 An autonomous pipeline for writing, revising, and publishing technical articles. From scattered thoughts to polished, source-checked, anti-slop-reviewed articles.
 
-**Status:** Working end-to-end with ZAI (glm-4-plus) and Anthropic (Claude). Tested on ARM64 Linux (Raspberry Pi 5 / Asgard-Pi).
+**Status:** Working end-to-end with ZAI (glm-4-plus) and Anthropic (Claude). Tested on ARM64 Linux (Raspberry Pi 5 / Pi).
 
 ---
 
@@ -143,12 +143,14 @@ Generates the structural layer files from your seed:
 Writes each section of the article one at a time. Runs `anti_slop.py` after each section to remove AI tells. Then runs full evaluation.
 
 ### Phase 3: Revision
-Multi-cycle revision loop:
-1. Evaluate the full article (scores: clarity, conciseness, technical, sources, tone, slop)
-2. Adversarial edit — finds verbose or weak passages
-3. Revise the section with the most flagged cuts, targeting the weakest dimension
-4. Anti-slop recheck on revised section
-5. Repeat until score plateaus or max cycles (5) reached
+Multi-cycle revision loop with per-section scoring and automatic degradation recovery:
+1. Evaluate each section individually — identifies the lowest-scoring section and its weakest dimension
+2. Snapshot all sections before making changes
+3. Adversarial edit pass — finds verbose or weak passages
+4. Revise the lowest-scoring section, targeting its specific weakest dimension
+5. Anti-slop recheck on revised section
+6. If overall score dropped vs previous cycle — restore sections and stop
+7. If score plateaus or improves sufficiently — continue (max 3 cycles)
 
 ### Phase 4: Polish
 - Final anti-slop scan
@@ -179,7 +181,7 @@ For full criteria see `refs/article_types.md`.
 Regex scanner that kills banned AI words on sight: delve, utilize, leverage, facilitate, elucidate, testament, synergy, etc. Also catches vague quantification (many, several, rather) and flags passive voice.
 
 **2. LLM Judge (evaluate.py)**
-A separate model call scores six dimensions: clarity, conciseness, technical accuracy, source integrity, tone consistency, slop. Returns per-section and overall scores. The revision loop targets the weakest dimension.
+Scores six dimensions per section: clarity, conciseness, technical accuracy, source integrity, tone consistency, slop. Per-section scores identify the exact section to revise; the weakest dimension of that section drives targeted revision. Restore-on-degradation prevents compounding quality loss across cycles.
 
 ---
 
@@ -197,7 +199,7 @@ sections/
 final_article.md      — Assembled article (pipeline output)
 bibliography.md       — Citations (if include_sources != none)
 eval_logs/
-  cycle_N.json        — Per-cycle evaluation scores
+  cycle_N.json        — Per-cycle evaluation (per-section scores + overall)
 edit_logs/
   section_NN_cuts.json — Per-section adversarial cut lists
 state.json            — Pipeline state (which phase, cycle, etc.)
