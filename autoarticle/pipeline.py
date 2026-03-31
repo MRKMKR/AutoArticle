@@ -36,8 +36,8 @@ PHASE_REQUIREMENTS = {
             ["Sources", "Claim"],
         ),
         "claims.json": (
-            "Structured claims from gen_claims",
-            ["id", "text", "section"],
+            "Structured claims from gen_claims (may be empty for opinion pieces)",
+            ["["],  # Valid JSON array (empty or non-empty)
         ),
     },
     "revision": {
