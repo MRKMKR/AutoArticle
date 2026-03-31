@@ -143,8 +143,8 @@ Generates the structural layer files from your seed:
 Writes each section of the article one at a time. Runs `anti_slop.py` after each section to remove AI tells. Then runs full evaluation.
 
 ### Phase 3: Revision
-Multi-cycle revision loop with per-section scoring and automatic degradation recovery:
-1. Evaluate each section individually — identifies the lowest-scoring section and its weakest dimension
+Multi-cycle revision loop with stable per-section scoring and automatic degradation recovery:
+1. Evaluate each section individually (3 averaged judge calls for stability) — identifies the lowest-scoring section and its weakest dimension
 2. Snapshot all sections before making changes
 3. Adversarial edit pass — finds verbose or weak passages
 4. Revise the lowest-scoring section, targeting its specific weakest dimension
@@ -154,8 +154,8 @@ Multi-cycle revision loop with per-section scoring and automatic degradation rec
 
 ### Phase 4: Polish
 - Final anti-slop scan
-- Build bibliography (from `sources.md`)
-- Assemble all sections into `final_article.md`
+- Build bibliography if `include_sources` is set (from `sources.md` / `claims.json`)
+- LLM-based assembly: two-pass transition planner + voice-guided final assembly
 
 ---
 
@@ -181,7 +181,7 @@ For full criteria see `refs/article_types.md`.
 Regex scanner that kills banned AI words on sight: delve, utilize, leverage, facilitate, elucidate, testament, synergy, etc. Also catches vague quantification (many, several, rather) and flags passive voice.
 
 **2. LLM Judge (evaluate.py)**
-Scores six dimensions per section: clarity, conciseness, technical accuracy, source integrity, tone consistency, slop. Per-section scores identify the exact section to revise; the weakest dimension of that section drives targeted revision. Restore-on-degradation prevents compounding quality loss across cycles.
+Scores six dimensions per section: clarity, conciseness, technical accuracy, source integrity, tone consistency, slop. Per-section scores identify the exact section to revise; the weakest dimension of that section drives targeted revision. Each evaluation averages 3 judge calls for stable signals — reduces per-call variance from ~1.5 points to ~0.5. Restore-on-degradation prevents compounding quality loss across cycles.
 
 ---
 
@@ -249,6 +249,10 @@ cat final_article.md
 ```
 
 ---
+
+## What's Missing
+
+- **Fact-checking:** `claims.json` identifies which claims need verification, but the actual verification step (fetching URLs, checking facts against sources) is not yet automated. Set `include_sources: basic` or `full` in `seed.txt` to generate claims — verification is planned.
 
 ## Inspiration
 
