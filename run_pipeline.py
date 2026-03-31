@@ -296,25 +296,33 @@ def phase_revision(max_cycles: int = 5) -> bool:
         cprint("\n  [Adversarial edit]", CYAN)
         run_python("autoarticle/revision/adversarial_edit.py", ["all", "--target-pct", "15", "--output", "edit_logs/"], cwd=WORKDIR)
 
-        # Find weakest section
-        weakest_section = None
+        # Find weakest dimension (from eval) and weakest section (from adversarial edit cuts)
+        weakest_dim = "clarity"
+        weakest_section = "1"
         if current_scores and isinstance(current_scores, dict):
-            # Find section with lowest score
-            weakest = current_scores.get("weakest_dimension", "")
-            section_scores = {k: v for k, v in current_scores.items()
-                              if k not in ("overall", "weakest_dimension", "suggestions")}
-            if section_scores:
-                weakest_section = min(section_scores, key=lambda s: section_scores[s].get("score", 10) if isinstance(section_scores[s], dict) else 10)
+            weakest_dim = current_scores.get("weakest_dimension", "clarity")
 
-        # If no specific section found, pick section 1
-        if not weakest_section:
-            weakest_section = 1
+        # Pick section with most adversarial cuts; fallback to section 1
+        import re
+        cut_counts = {}
+        edit_dir = WORKDIR / "edit_logs"
+        if edit_dir.exists():
+            for cut_file in sorted(edit_dir.glob("section_*_cuts.json")):
+                try:
+                    cuts = json.loads(cut_file.read_text())
+                    cut_counts[cut_file.name] = len(cuts.get("cuts", []))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            if cut_counts:
+                worst_file = max(cut_counts, key=cut_counts.get)
+                m = re.search(r"section_(\d+)", worst_file)
+                if m:
+                    weakest_section = m.group(1)
 
-        # Revise weakest section
-        cprint(f"\n  [Revise section {weakest_section} — targeting {current_scores.get('weakest_dimension', 'general') if current_scores else 'general'}]", CYAN)
+        cprint(f"\n  [Revise section {weakest_section} — targeting {weakest_dim}]", CYAN)
         run_python(
             "autoarticle/revision/gen_revision.py",
-            [str(weakest_section), "--auto", current_scores.get("weakest_dimension", "clarity") if current_scores else "clarity"],
+            [str(weakest_section), "--auto", weakest_dim],
             cwd=WORKDIR,
         )
 
