@@ -169,6 +169,11 @@ def main():
     structure = TYPE_STRUCTURES.get(article_type, TYPE_STRUCTURES["explainer"])
     structure_text = "\n".join(f"  {i+1}. {n}: {h}" for i, (n, h) in enumerate(structure))
 
+    # Skip Links section if no sources required
+    include_sources = seed.get("include_sources", "basic").strip().lower()
+    if include_sources == "none":
+        structure_text += "\n  (Do NOT include a Links/Resources/Further Reading section — this article has include_sources: none)"
+
     prompt = f"""Generate an article outline.
 
 ## Article Specification

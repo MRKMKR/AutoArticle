@@ -27,7 +27,11 @@ Rules:
 
 def assemble_direct(sections_dir: Path, output_path: Path) -> None:
     section_files = sorted(sections_dir.glob("section_*.md"))
-    parts = [sf.read_text().strip() for sf in section_files if sf.read_text().strip()]
+    parts = []
+    for sf in section_files:
+        content = sf.read_text().strip()
+        if content:
+            parts.append(content)
 
     title = ""
     seed_path = Path("seed.txt")
@@ -48,7 +52,12 @@ def assemble_direct(sections_dir: Path, output_path: Path) -> None:
 
 def assemble_llm(sections_dir: Path, output_path: Path) -> None:
     section_files = sorted(sections_dir.glob("section_*.md"))
-    sections_text = "\n\n".join(f"--- {sf.name} ---\n{sf.read_text().strip()}" for sf in section_files if sf.read_text().strip())
+    section_parts = []
+    for sf in section_files:
+        content = sf.read_text().strip()
+        if content:
+            section_parts.append(f"--- {sf.name} ---\n{content}")
+    sections_text = "\n\n".join(section_parts)
 
     title = ""
     seed_path = Path("seed.txt")

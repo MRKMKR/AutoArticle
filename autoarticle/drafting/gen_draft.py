@@ -24,7 +24,8 @@ Rules:
 - No Tier 1 banned words (delve, utilize, leverage, facilitate, elucidate, embark, endeavor, encompass, multifaceted, tapestry, testament, paradigm, synergy, holistic, catalyze, juxtapose, realm, landscape, myriad, plethora)
 - Do not use claim inflation (revolutionary, groundbreaking, game-changing)
 - Be specific — numbers, names, exact details
-- Write ONLY this section — no intros/outros/structure markers"""
+- Write ONLY this section — no intros/outros/structure markers
+- Do NOT invent or add any URLs, citations, references, or source attributions"""
 
 
 def load_context(section_num: int) -> str:

@@ -24,6 +24,7 @@ Rules:
 - Only change what the brief asks to change
 - Maintain voice and tone from voice.md
 - Do not introduce new content unless asked
+- Do NOT add citations, references, or source attributions unless the article explicitly includes sources
 - Output ONLY the revised section — no headers, no markers"""
 
 
@@ -72,6 +73,17 @@ def main():
         if p.exists():
             ctx_parts.append(f"=== {fname} ===\n{p.read_text()[:1500]}")
     context = "\n\n".join(ctx_parts)
+
+    # Check include_sources from seed
+    include_sources = "none"
+    seed_p = Path("seed.txt")
+    if seed_p.exists():
+        for line in seed_p.read_text().splitlines():
+            if line.startswith("include_sources:"):
+                include_sources = line.split(":", 1)[1].strip()
+                break
+    if include_sources == "none":
+        context += "\n\n[IMPORTANT] This article has include_sources: none — do NOT add any citations, references, or source attributions. If you need to make a factual claim, use your existing knowledge without citing sources."
 
     prompt = f"""Rewrite section {section_num} based on this revision brief.
 
