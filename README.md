@@ -51,10 +51,16 @@ tone: casual           # casual | semi-formal | formal
 audience: intermediate # beginner | intermediate | expert
 
 seed_bullets:
-- First concrete fact, observation, or claim about the topic
-- Second point — specific details beat vague ideas every time
-- Third point
-- ... (6-15 bullets works well; 3 is too few, 20 is too many)
+- The friction of starting from a blank page is the primary motivation
+- Traditional article writing processes often begin with minimal structure
+- The goal is to transform simple seed information into complete articles
+- Core idea: writing as a stack of layer files feeding into section drafts
+- The pipeline runs four phases: Foundation, Draft, Revision, Polish
+- Anti-slop regex kills AI tells (delve, utilize, leverage, etc.)
+- LLM judge scores six dimensions per section for consistent evaluation
+- Raspberry Pi 5 implementation achieves ~$0.02/article cost efficiency
+- The hardest part was developing an effective evaluation signal for quality
+- Future: automated source discovery and LLM-based assembly for content
 ```
 
 ### What Makes a Good Seed

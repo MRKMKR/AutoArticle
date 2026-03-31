@@ -44,13 +44,16 @@ tone: casual           # casual / semiformal / formal
 audience: intermediate # beginner / intermediate / expert / general
 
 seed_bullets:
-- I built an ESP32-based AI companion with vision
-- It uses LiveKit for voice and Hermes Agent for orchestration
-- The hardware is cheap (~$30 SenseCAP Watcher)
-- I went through several iterations (xiaozhi -> agentic -> current)
-- The goal is proactive, on-device, privacy-first AI
-- For neurodivergent people, AI could notice what you miss
-- Current status: voice works, vision experimental, long-term memory functional
+- The friction of starting from a blank page is the primary motivation
+- Traditional article writing processes often begin with minimal structure
+- The goal is to transform simple seed information into complete articles
+- Core idea: writing as a stack of layer files feeding into section drafts
+- The pipeline runs four phases: Foundation, Draft, Revision, Polish
+- Anti-slop regex kills AI tells (delve, utilize, leverage, etc.)
+- LLM judge scores six dimensions per section for consistent evaluation
+- Raspberry Pi 5 implementation achieves ~$0.02/article cost efficiency
+- The hardest part was developing an effective evaluation signal for quality
+- Future: automated source discovery and LLM-based assembly for content
 
 examples:
 - https://example.com/good-technical-writeup
