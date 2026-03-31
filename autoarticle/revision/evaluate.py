@@ -74,8 +74,12 @@ def build_context() -> str:
     return "\n\n".join(parts)
 
 
-def score_text(text: str, context: str) -> dict:
-    prompt = f"""Evaluate this article.
+def score_text(text: str, context: str, n_calls: int = 1) -> dict:
+    """Score article text. When n_calls > 1, averages scores across multiple judge calls
+    for stability. Particularly useful for per-section scoring where judge variance
+    can swamp the signal."""
+    if n_calls <= 1:
+        prompt = f"""Evaluate this article.
 
 ## Article Text
 
@@ -84,8 +88,63 @@ def score_text(text: str, context: str) -> dict:
 ## Context
 
 {context[:4000]}"""
-    raw = api_post(prompt, system=SYSTEM, max_tokens=1024)
-    return parse_json_response(raw)
+        raw = api_post(prompt, system=SYSTEM, max_tokens=1024)
+        return parse_json_response(raw)
+
+    # n_calls > 1: collect all responses and average
+    dims = ["clarity", "conciseness", "technical", "sources", "tone", "slop"]
+    weights = [0.25, 0.15, 0.25, 0.20, 0.10, 0.05]
+
+    all_scores: list[dict] = []
+    for i in range(n_calls):
+        call_context = f"{context[:4000]}\n\n[Evaluation round {i + 1} of {n_calls}]"
+        prompt = f"""Evaluate this article.
+
+## Article Text
+
+{text[:8000]}
+
+## Context
+
+{call_context}"""
+        raw = api_post(prompt, system=SYSTEM, max_tokens=1024)
+        result = parse_json_response(raw)
+
+        # Extract numeric scores
+        scored = {}
+        for d in dims:
+            s = result.get(d, {}).get("score", 6)
+            scored[d] = max(0, min(10, s))  # clamp to 0-10
+        all_scores.append(scored)
+
+    # Average each dimension across all calls
+    averaged: dict = {}
+    for d in dims:
+        vals = [s[d] for s in all_scores if d in s]
+        avg = round(sum(vals) / len(vals), 1) if vals else 6.0
+        # Preserve notes from the first call only
+        notes = all_scores[0].get(d, {}).get("notes", "") if all_scores else ""
+        averaged[d] = {"score": avg, "notes": notes}
+
+    # Overall = weighted average of averaged dimensions
+    total_w = sum(weights)
+    overall = round(
+        sum(averaged.get(d, {}).get("score", 6) * w for d, w in zip(dims, weights)) / total_w, 1
+    )
+
+    # Weakest = dimension with lowest averaged score
+    weakest = min(dims, key=lambda d: averaged.get(d, {}).get("score", 10))
+
+    # Suggestions from first call
+    suggestions = all_scores[0].get("suggestions", []) if all_scores else []
+
+    return {
+        **{d: v for d, v in averaged.items()},
+        "overall": overall,
+        "weakest_dimension": weakest,
+        "suggestions": suggestions,
+        "_n_calls": n_calls,  # metadata for debugging
+    }
 
 
 def score_foundation() -> dict:
@@ -118,7 +177,7 @@ def score_section(section_num: int) -> dict:
 
     context = "\n\n".join(ctx_parts)
     text = section_path.read_text()
-    return score_text(text, context)
+    return score_text(text, context, n_calls=3)
 
 
 def score_all_sections() -> dict:
@@ -223,7 +282,7 @@ def score_full() -> dict:
             "passive_ratio": round(f["passive_ratio"], 3),
         })
 
-    scores = score_text(text, context)
+    scores = score_text(text, context, n_calls=3)
 
     # Adjust slop score mechanically
     total_t1 = sum(s["tier1"] for s in slop_mechanical)
