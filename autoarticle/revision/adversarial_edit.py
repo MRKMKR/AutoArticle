@@ -29,6 +29,12 @@ For each cut, provide:
 - severity: high/medium/low
 - reason: brief justification
 
+IMPORTANT — thematic anchors vs. redundant content:
+- A phrase that RECURS across multiple sections (e.g. "starting from a blank page" as a theme)
+  is a THEME ANCHOR, not redundant. Do NOT flag thematic anchors as REDUNDANT.
+- Only flag as REDUNDANT content that is repeated WITHIN THIS SECTION and serves no purpose.
+- Content that matches the required key claims for this section must be PRESERVED.
+
 Return ONLY valid JSON:
 {{"cuts": [{{"text": "...", "classification": "...", "severity": "high", "reason": "..."}}]}}"""
 
@@ -49,14 +55,59 @@ def parse_json(raw: str) -> dict:
         return {"cuts": [], "parse_error": raw[:200]}
 
 
+def extract_section_claims(outline_text: str, section_num: int) -> str:
+    """Extract key claims for a specific section from the outline.
+
+    Handles the ## N. Title format from gen_outline.py.
+    Also handles legacy formats as belt-and-braces.
+    """
+    import re
+
+    # Normalize: collect all ## headings with their position
+    headings = [(m.start(), m.group(1).strip()) for m in re.finditer(r'^## (.+)$', outline_text, re.MULTILINE)]
+    if not headings:
+        return ""
+
+    # Find the nth section's heading (1-indexed by section number)
+    idx = section_num - 1
+    if idx < 0 or idx >= len(headings):
+        return ""
+
+    section_start = headings[idx][0]
+
+    # Find where this section ends (next ## heading or end of file)
+    if idx + 1 < len(headings):
+        section_end = headings[idx + 1][0]
+    else:
+        section_end = len(outline_text)
+
+    section_block = outline_text[section_start:section_end]
+
+    # Extract key claims from the section block
+    claims = re.findall(r'^\s*-\s+(.+)$', section_block, re.MULTILINE)
+    return "\n".join(f"  - {c}" for c in claims if c)
+
+
 def process_file(section_path: Path, target_pct: int, output_dir: Path) -> dict:
     text = section_path.read_text()
     orig_words = len(text.split())
 
+    # Extract key claims for this section from the outline
+    key_claims = ""
+    outline_path = Path("outline.md")
+    if outline_path.exists():
+        outline_text = outline_path.read_text()
+        # Derive section number from filename (section_01.md → 1)
+        m = re.search(r"section_(\d+)", section_path.name)
+        if m:
+            section_num = int(m.group(1))
+            key_claims = extract_section_claims(outline_text, section_num)
+
+    claims_block = f"\n\nRequired key claims for this section (MUST BE PRESERVED):\n{key_claims}\n" if key_claims else "\n"
+
     prompt = f"""Identify cuts to make this text approximately {target_pct}% more concise.
 For each cut provide text, classification, severity, and reason.
-
-Text:
+{claims_block}Text:
 {text[:6000]}"""
 
     raw = api_post(prompt, system=SYSTEM, max_tokens=1536)
