@@ -37,7 +37,7 @@ PHASE_REQUIREMENTS = {
         ),
         "claims.json": (
             "Structured claims from gen_claims (may be empty for opinion pieces)",
-            ["["],  # Valid JSON array (empty or non-empty)
+            None,  # Skip content hint check — JSON may be [] for opinion pieces
         ),
     },
     "revision": {
@@ -145,6 +145,17 @@ def check_phase(phase: str, missing_only: bool = False) -> bool:
                 print(f"  [ ] FAIL outline has no sections")
                 all_ok = False
 
+        # Validate claims.json is valid JSON (may be [] for opinion pieces)
+        claims_path = Path("claims.json")
+        if claims_path.exists() and claims_path.stat().st_size > 0:
+            try:
+                import json
+                json.loads(claims_path.read_text())
+                print(f"  [✓] PASS claims.json         (valid JSON)")
+            except json.JSONDecodeError as e:
+                print(f"  [✗] FAIL claims.json         (invalid JSON: {e})")
+                all_ok = False
+
     if phase == "revision":
         sections_dir = Path("sections")
         if sections_dir.exists():
@@ -164,10 +175,12 @@ def check_phase(phase: str, missing_only: bool = False) -> bool:
 
 
 def check_section_count() -> int:
-    """Count sections from outline."""
+    """Count sections from outline. Handles all ## heading formats."""
     if not Path("outline.md").exists():
         return 0
-    return Path("outline.md").read_text().count("## Section")
+    import re
+    text = Path("outline.md").read_text()
+    return len(re.findall(r'^## [^#]', text, re.MULTILINE))
 
 
 def main():
