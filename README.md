@@ -92,23 +92,6 @@ seed_bullets:
 - AI is changing software development
 ```
 
-**Good seed (specific, experiential):**
-```
-type: project
-title: "Building a Desktop AI Companion"
-target_length: medium
-tone: casual
-audience: intermediate
-seed_bullets:
-- I built an ESP32-based AI companion with vision
-- It uses LiveKit for voice and Hermes Agent for orchestration
-- The hardware is cheap (~$30 SenseCAP Watcher)
-- I went through several iterations (xiaozhi -> agentic -> current)
-- The goal is proactive, on-device, privacy-first AI
-- For neurodivergent people, AI could notice what you miss
-- Current status: voice works, vision experimental, long-term memory functional
-```
-
 ### Spelling Region
 
 `spelling_region` controls which spelling conventions are enforced throughout the pipeline:
